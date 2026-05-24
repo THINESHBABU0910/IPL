@@ -29,16 +29,6 @@ function defaultFlexPrice(player: Player): number {
 }
 
 export default function RetentionPhase({ roomState, myTeamId, socket }: RetentionPhaseProps) {
-  if (!myTeamId) {
-    return (
-      <div className="panel-fill flex items-center justify-center px-4">
-        <p className="text-center text-gray-400 text-sm">
-          Pick a free team above to set retentions, or skip when you join a team.
-        </p>
-      </div>
-    );
-  }
-
   const isFlexMode = roomState.mode === "flex_retention";
   const maxCapped = isFlexMode ? FLEX_MAX_CAPPED_RETENTIONS : MAX_CAPPED_RETENTIONS;
   const maxUncapped = isFlexMode ? FLEX_MAX_UNCAPPED_RETENTIONS : MAX_UNCAPPED_RETENTIONS;
@@ -167,6 +157,16 @@ export default function RetentionPhase({ roomState, myTeamId, socket }: Retentio
   const canLock = !isLocked && selectedIds.length > 0 && purseLeft >= 0 &&
     (!isFlexMode || selectedIds.every((id) => (Number(customPrices[id]) || 0) > 0));
   const canSkip = !isLocked;
+
+  if (!myTeamId) {
+    return (
+      <div className="panel-fill flex items-center justify-center px-4">
+        <p className="text-center text-gray-400 text-sm">
+          Pick a free team above to set retentions, or skip when you join a team.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="panel-fill flex flex-col px-2 pb-1">
