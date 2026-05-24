@@ -1,0 +1,10 @@
+name: ipl-auction
+type: web
+build:
+  command: npm install && npm run build
+run:
+  command: npm start
+  port: 3000
+env:
+  - key: NODE_ENV
+    value: production

@@ -1,0 +1,218 @@
+import { Player, BidResult } from "../lib/types";
+import {
+  calculateBidIncrement, calculateNextBid, getOverseasBidCapLakhs,
+  MAX_SQUAD_SIZE, MIN_SQUAD_SIZE, MAX_OVERSEAS, MIN_BASE_PRICE_LAKHS,
+  TIMER_INITIAL, TIMER_BID_RESET, TIMER_MAX, ROUND2_DISCOUNT, formatPrice,
+} from "../lib/iplRules";
+import {
+  buildSetQueues, pickRandomFromSets, countPoolRemaining, flattenQueues,
+} from "../lib/auctionPool";
+import type { Room } from "./gameState";
+
+function applyRound2Discount(player: Player): Player {
+  const basePriceLakhs = Math.max(
+    MIN_BASE_PRICE_LAKHS,
+    Math.round(player.basePriceLakhs * ROUND2_DISCOUNT)
+  );
+  return {
+    ...player,
+    basePriceLakhs,
+    basePrice: basePriceLakhs * 100000,
+    displayPrice: formatPrice(basePriceLakhs),
+  };
+}
+
+function syncRemainingPool(room: Room): void {
+  if (room.poolMeta) {
+    room.auction.remainingPool = flattenQueues(room.poolMeta);
+  }
+}
+
+export function presentNextPlayer(room: Room): Player | null {
+  const { auction } = room;
+
+  if (!room.poolMeta || countPoolRemaining(room.poolMeta) === 0) {
+    if (auction.round === 1 && auction.unsoldPlayers.length > 0) {
+      auction.round = 2;
+      const discounted = auction.unsoldPlayers.map(applyRound2Discount);
+      room.poolMeta = buildSetQueues(discounted, `${room.id}-round2-${Date.now()}`);
+      auction.unsoldPlayers = [];
+      syncRemainingPool(room);
+    } else {
+      return null;
+    }
+  }
+
+  if (!room.poolMeta) return null;
+
+  const result = pickRandomFromSets(room.poolMeta);
+  if (!result) {
+    if (auction.round === 1 && auction.unsoldPlayers.length > 0) {
+      auction.round = 2;
+      const discounted = auction.unsoldPlayers.map(applyRound2Discount);
+      room.poolMeta = buildSetQueues(discounted, `${room.id}-round2-${Date.now()}`);
+      auction.unsoldPlayers = [];
+      syncRemainingPool(room);
+      return presentNextPlayer(room);
+    }
+    return null;
+  }
+
+  room.poolMeta = result.meta;
+  syncRemainingPool(room);
+
+  const player = result.player;
+  auction.currentPlayer = player;
+  auction.currentBid = player.basePriceLakhs;
+  auction.currentBidder = null;
+  auction.nextBidAmount = player.basePriceLakhs;
+  auction.timerSeconds = TIMER_INITIAL;
+  auction.currentSetName = player.set;
+  auction.isRTM = false;
+  auction.rtmTeamId = null;
+  auction.rtmPrice = 0;
+  auction.bidHistory = [];
+
+  return player;
+}
+
+export function processBid(room: Room, teamId: string): BidResult {
+  const { auction } = room;
+  const team = room.teams.get(teamId);
+
+  if (!team) return { success: false, reason: "Team not found" };
+  if (auction.phase !== "auction" || !auction.currentPlayer)
+    return { success: false, reason: "No active auction" };
+  if (auction.isPaused)
+    return { success: false, reason: "Auction paused" };
+  if (auction.currentBidder === teamId)
+    return { success: false, reason: "You are already the highest bidder" };
+
+  const bidAmount = auction.currentBidder === null
+    ? auction.currentPlayer.basePriceLakhs
+    : auction.nextBidAmount;
+
+  const overseasCap = getOverseasBidCapLakhs(room.mode, auction.currentPlayer.isOverseas);
+  if (overseasCap !== null && bidAmount > overseasCap) {
+    return {
+      success: false,
+      reason: `Overseas max fee is ${formatPrice(overseasCap)}`,
+    };
+  }
+
+  if (team.purse < bidAmount)
+    return { success: false, reason: "Insufficient purse" };
+
+  const totalPlayers = team.squad.length + team.retainedPlayers.length;
+  if (totalPlayers >= MAX_SQUAD_SIZE)
+    return { success: false, reason: "Squad is full (max 25)" };
+
+  if (auction.currentPlayer.isOverseas) {
+    const overseasCount = [...team.squad, ...team.retainedPlayers]
+      .filter((p) => p.isOverseas).length;
+    if (overseasCount >= MAX_OVERSEAS)
+      return { success: false, reason: "Overseas limit reached (max 8)" };
+  }
+
+  const slotsNeeded = MIN_SQUAD_SIZE - totalPlayers - 1;
+  if (slotsNeeded > 0) {
+    const purseAfterBid = team.purse - bidAmount;
+    if (purseAfterBid < slotsNeeded * MIN_BASE_PRICE_LAKHS)
+      return { success: false, reason: "Must reserve budget for minimum squad" };
+  }
+
+  auction.currentBid = bidAmount;
+  auction.currentBidder = teamId;
+  auction.nextBidAmount = calculateNextBid(bidAmount);
+  auction.timerSeconds = Math.min(auction.timerSeconds + TIMER_BID_RESET, TIMER_MAX);
+  auction.bidHistory.push({ teamId, amount: bidAmount, timestamp: Date.now() });
+
+  return { success: true };
+}
+
+export function sellPlayer(room: Room): { player: Player; teamId: string; price: number } | null {
+  const { auction } = room;
+  if (!auction.currentPlayer || !auction.currentBidder) return null;
+
+  const team = room.teams.get(auction.currentBidder);
+  if (!team) return null;
+
+  const player = auction.currentPlayer;
+  const price = auction.currentBid;
+  const buyerId = auction.currentBidder;
+
+  team.squad.push(player);
+  team.purse -= price;
+  auction.soldPlayers.push({ player, teamId: buyerId, price });
+
+  auction.rtmPrice = price;
+  auction.currentPlayer = null;
+  auction.currentBid = 0;
+  auction.currentBidder = null;
+
+  return { player, teamId: buyerId, price };
+}
+
+export function markUnsold(room: Room): Player | null {
+  const { auction } = room;
+  if (!auction.currentPlayer) return null;
+
+  const player = auction.currentPlayer;
+  auction.unsoldPlayers.push(player);
+  auction.currentPlayer = null;
+  auction.currentBid = 0;
+  auction.currentBidder = null;
+  auction.rtmPrice = 0;
+
+  return player;
+}
+
+export function checkRTM(room: Room, player: Player, buyerTeamId: string, salePrice: number): string | null {
+  const prevTeam = player.previousTeam;
+  if (!prevTeam || prevTeam === "None" || prevTeam === buyerTeamId) return null;
+
+  const team = room.teams.get(prevTeam);
+  if (!team || team.rtmCards <= 0) return null;
+
+  const totalPlayers = team.squad.length + team.retainedPlayers.length;
+  if (totalPlayers >= MAX_SQUAD_SIZE) return null;
+  if (team.purse < salePrice) return null;
+
+  if (player.isOverseas) {
+    const overseasCount = [...team.squad, ...team.retainedPlayers].filter((p) => p.isOverseas).length;
+    if (overseasCount >= MAX_OVERSEAS) return null;
+  }
+
+  return prevTeam;
+}
+
+export function executeRTM(room: Room, rtmTeamId: string, price: number): boolean {
+  const { auction } = room;
+  if (!auction.currentPlayer) return false;
+
+  const team = room.teams.get(rtmTeamId);
+  if (!team || team.rtmCards <= 0) return false;
+  if (team.purse < price) return false;
+
+  const lastSale = auction.soldPlayers[auction.soldPlayers.length - 1];
+  if (lastSale) {
+    const buyerTeam = room.teams.get(lastSale.teamId);
+    if (buyerTeam) {
+      buyerTeam.squad = buyerTeam.squad.filter((p) => p.id !== lastSale.player.id);
+      buyerTeam.purse += lastSale.price;
+    }
+    auction.soldPlayers.pop();
+  }
+
+  team.squad.push(auction.currentPlayer);
+  team.purse -= price;
+  team.rtmCards--;
+  auction.soldPlayers.push({ player: auction.currentPlayer, teamId: rtmTeamId, price });
+
+  return true;
+}
+
+export function getRemainingCount(room: Room): number {
+  return countPoolRemaining(room.poolMeta) +
+    (room.auction.round === 1 ? room.auction.unsoldPlayers.length : 0);
+}
