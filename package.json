@@ -1,0 +1,43 @@
+{
+  "name": "ipl-auction",
+  "version": "1.0.0",
+  "private": true,
+  "engines": {
+    "node": ">=20 <23"
+  },
+  "scripts": {
+    "dev": "npx ts-node --project tsconfig.server.json server.ts",
+    "build": "next build",
+    "start": "npx ts-node --project tsconfig.server.json server.ts",
+    "lint": "next lint",
+    "generate-players": "node scripts/generate-players-2026.mjs",
+    "download-logos": "node scripts/download-logos.mjs"
+  },
+  "dependencies": {
+    "next": "^14.2.29",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "socket.io": "^4.8.1",
+    "socket.io-client": "^4.8.1",
+    "express": "^4.21.2",
+    "framer-motion": "^11.18.2",
+    "nanoid": "^5.1.2",
+    "clsx": "^2.1.1",
+    "tailwind-merge": "^2.6.0",
+    "lucide-react": "^0.474.0",
+    "sonner": "^1.7.4"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.4",
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "@types/express": "^5.0.0",
+    "typescript": "^5.7.3",
+    "tailwindcss": "^3.4.17",
+    "postcss": "^8.5.1",
+    "autoprefixer": "^10.4.20",
+    "eslint": "^8.57.1",
+    "eslint-config-next": "^14.2.29",
+    "ts-node": "^10.9.2"
+  }
+}

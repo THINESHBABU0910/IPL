@@ -1,0 +1,15 @@
+# Render Blueprint — free web service (no credit card on signup for basic deploy)
+# Dashboard: https://dashboard.render.com → New → Blueprint → connect repo
+services:
+  - type: web
+    name: ipl-auction
+    runtime: node
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    healthCheckPath: /
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: "20"
