@@ -261,7 +261,7 @@ export interface ServerToClientEvents {
 
 export interface ClientToServerEvents {
   "create-room": (data: CreateRoomPayload, callback: (res: { roomId?: string; sessionToken?: string; error?: string }) => void) => void;
-  "join-room": (data: JoinRoomPayload, callback: (res: { success: boolean; sessionToken?: string; teamId?: string; error?: string }) => void) => void;
+  "join-room": (data: JoinRoomPayload, callback: (res: { success: boolean; sessionToken?: string; teamId?: string; isSpectator?: boolean; error?: string }) => void) => void;
   "pick-team": (data: PickTeamPayload, callback?: (res: { success: boolean; sessionToken?: string }) => void) => void;
   "player-ready": () => void;
   "lock-retentions": (data: LockRetentionsPayload) => void;

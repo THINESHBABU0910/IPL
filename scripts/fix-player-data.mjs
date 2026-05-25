@@ -9,6 +9,25 @@ import { fileURLToPath } from "url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PLAYERS_PATH = path.join(__dirname, "../src/data/players.json");
 const MARQUEE_TS_PATH = path.join(__dirname, "../src/data/marqueeList.ts");
+const AUCTION_LIST_PATH = path.join(__dirname, "auction-list-2026.txt");
+
+const COUNTRIES = [
+  "New Zealand", "South Africa", "Sri Lanka", "West Indies", "Afghanistan",
+  "Bangladesh", "Australia", "England", "Zimbabwe", "Ireland", "Malaysia", "India",
+];
+
+const MARQUEE_BASE = 20_000_000; // ₹2 Cr
+const VALID_CAPPED_LAKHS = new Set([75, 100, 125, 150, 200]);
+const VALID_UNCAPPED_LAKHS = new Set([30, 40, 50, 125]);
+
+const SET_DEFAULT_BASE_LAKHS = {
+  M1: 200, M2: 200, BA1: 200,
+  BA2: 75, BA3: 75, BA4: 75,
+  AL1: 200, AL2: 75, AL3: 75, AL4: 75,
+  WK1: 200, WK2: 75,
+  FA1: 200, FA2: 75, FA3: 75, FA4: 75, FA5: 75,
+  SP1: 200, SP2: 75,
+};
 
 /** Retained / missing-from-PDF players — correct IPL roles */
 const PLAYER_PROFILES = {
@@ -124,13 +143,104 @@ export const MARQUEE_M1_IDS = [
 export const MARQUEE_M2_IDS = [
   "P387", "P511", "P434", "P512", "P538", "P476", "P475", "P029", "P030", "P392",
   "P452", "P516", "P448", "P378", "P471", "P427", "P456", "P008", "P010", "P011",
-  "P013", "P473", "P528", "P520", "P461",
+  "P013", "P473", "P528", "P002", "P461",
 ];
 
 const MARQUEE_ALL = new Set([...MARQUEE_M1_IDS, ...MARQUEE_M2_IDS]);
 const MARQUEE_M1 = new Set(MARQUEE_M1_IDS);
 const MARQUEE_M2 = new Set(MARQUEE_M2_IDS);
-const MARQUEE_BASE = 20_000_000;
+
+function parseOfficialAuctionLine(line) {
+  const m = line.match(/^(\d+)\s+(\d+)\s+([A-Z]+\d+)\s+(.+)$/);
+  if (!m) return null;
+  const [, , , set, rest] = m;
+  const capMatch = rest.match(/\s(Capped|Uncapped|Associate)\s+(\d+)\s+([\w\s.-]+)$/);
+  if (!capMatch) return null;
+
+  const reservePrice = parseInt(capMatch[2], 10);
+  let body = rest.slice(0, capMatch.index).trim();
+  const teamMatch = body.match(/\s(CSK|MI|RCB|DC|KKR|SRH|PBKS|RR|GT|LSG|\d+)\s+\d+\s*$/);
+  if (teamMatch) body = body.slice(0, teamMatch.index).trim();
+
+  let country = null;
+  let countryIdx = -1;
+  for (const c of COUNTRIES) {
+    const idx = body.indexOf(` ${c} `);
+    if (idx !== -1) {
+      country = c;
+      countryIdx = idx;
+      break;
+    }
+  }
+  if (!country) return null;
+
+  const namePart = body.slice(0, countryIdx).trim();
+  const nameTokens = namePart.split(/\s+/);
+  let firstName;
+  let surname;
+  if (nameTokens.length === 1) {
+    firstName = nameTokens[0];
+    surname = capMatch[3].trim();
+  } else {
+    surname = nameTokens.pop();
+    firstName = nameTokens.join(" ");
+  }
+  const fullName = `${firstName} ${surname}`.replace(/\s+/g, " ").trim();
+
+  return {
+    name: normName(fullName),
+    reservePrice,
+    set,
+    isCapped: capMatch[1] === "Capped",
+  };
+}
+
+function loadOfficialPriceMap() {
+  if (!fs.existsSync(AUCTION_LIST_PATH)) return new Map();
+  const text = fs.readFileSync(AUCTION_LIST_PATH, "utf8");
+  const map = new Map();
+  for (const line of text.split("\n")) {
+    const trimmed = line.trim();
+    if (!/^\d+\s+\d+\s+[A-Z]+\d+\s+/.test(trimmed)) continue;
+    const parsed = parseOfficialAuctionLine(trimmed);
+    if (parsed) map.set(parsed.name, parsed.reservePrice);
+  }
+  return map;
+}
+
+function defaultBaseLakhs(set, isCapped) {
+  if (!isCapped) return 30;
+  if (SET_DEFAULT_BASE_LAKHS[set]) return SET_DEFAULT_BASE_LAKHS[set];
+  if (set.startsWith("M")) return 200;
+  if (set.startsWith("U")) return 30;
+  return 75;
+}
+
+function applyOfficialBasePrices(players, officialPrices) {
+  let fromPdf = 0;
+  let fromDefault = 0;
+  let marqueeFixed = 0;
+
+  for (const p of players) {
+    if (MARQUEE_ALL.has(p.id)) {
+      p.basePrice = MARQUEE_BASE;
+      marqueeFixed++;
+      continue;
+    }
+
+    const pdfLakhs = officialPrices.get(normName(p.name));
+    if (pdfLakhs != null) {
+      p.basePrice = pdfLakhs * 100_000;
+      fromPdf++;
+      continue;
+    }
+
+    p.basePrice = defaultBaseLakhs(p.set, p.isCapped) * 100_000;
+    fromDefault++;
+  }
+
+  return { fromPdf, fromDefault, marqueeFixed };
+}
 
 /** IPL 2026 retained uncapped players — domestic, no active intl cap (incl. MS Dhoni per BCCI rule) */
 const UNCAPPED_RETAINED_2026 = new Set([
@@ -323,11 +433,11 @@ function main() {
   for (const p of data.players) {
     if (UNCAPPED_RETAINED_2026.has(normName(p.name))) {
       p.isCapped = false;
-      if (!MARQUEE_ALL.has(p.id) && p.basePrice >= 20_000_000) {
-        p.basePrice = 4_000_000;
-      }
     }
   }
+
+  const officialPrices = loadOfficialPriceMap();
+  const priceStats = applyOfficialBasePrices(data.players, officialPrices);
 
   data.categories = buildCategories(data.players);
   fs.writeFileSync(PLAYERS_PATH, JSON.stringify(data, null, 2) + "\n");
@@ -340,6 +450,7 @@ function main() {
   console.log(`Profile/role fixes applied: ${profileFixed}`);
   console.log(`Marquee promoted: ${promotedMarquee} (M1=${m1.length}, M2=${m2.length})`);
   console.log(`Demoted from old marquee: ${demotedFromMarquee}`);
+  console.log(`Base prices — PDF: ${priceStats.fromPdf}, defaults: ${priceStats.fromDefault}, marquee: ${priceStats.marqueeFixed}`);
   console.log(`Set/role validation errors remaining: ${remainingErrors.length}`);
   if (remainingErrors.length) {
     remainingErrors.slice(0, 15).forEach((p) => console.log(" -", p.name, p.role, p.set));

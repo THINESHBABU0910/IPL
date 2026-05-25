@@ -8,7 +8,8 @@ import {
   serializeRoom, isHost, addActivity, addChat,
   generateSessionToken, resetRoomForRematch, reconnectByToken,
   pushAuctionActivity, normalizeRetentionPlayerIds,
-  allTeamsJoined, canStartAuction, claimVacantTeam, kickTeamOwner,
+  allTeamsJoined, canStartAuction, claimOpenTeam, addTeamMidGame,
+  kickTeamOwner, releaseOfflinePlayerSlot,
 } from "./gameState";
 import type { Room } from "./gameState";
 import {
@@ -20,6 +21,7 @@ import { isValidPlayerName, normalizePlayerName } from "../lib/validateName";
 import { getInitialRtmCards, isRetentionMode } from "../lib/iplRules";
 import { withRoomLock } from "./roomLock";
 import { saveRoomSnapshot, deleteRoomSnapshot, hydrateRoomsFromSnapshots, tryRestoreRoom } from "./roomPersistence";
+import { TEAM_MAP } from "../data/teams";
 
 type IOServer = Server<ClientToServerEvents, ServerToClientEvents>;
 type IOSocket = Socket<ClientToServerEvents, ServerToClientEvents>;
@@ -124,6 +126,23 @@ function scheduleCleanup(io: IOServer, room: Room): void {
   }, 1800000);
 }
 
+function isNameOnline(room: Room, io: IOServer, playerName: string): boolean {
+  const lower = playerName.toLowerCase();
+  for (const [sid, n] of room.playerNames) {
+    if (n.toLowerCase() === lower && io.sockets.sockets.has(sid)) return true;
+  }
+  return false;
+}
+
+function releaseOfflineName(room: Room, io: IOServer, playerName: string): void {
+  const lower = playerName.toLowerCase();
+  for (const [sid, n] of [...room.playerNames.entries()]) {
+    if (n.toLowerCase() === lower && !io.sockets.sockets.has(sid)) {
+      releaseOfflinePlayerSlot(room, sid);
+    }
+  }
+}
+
 function isJoined(room: Room, socketId: string): boolean {
   return room.playerNames.has(socketId) || room.spectators.has(socketId);
 }
@@ -182,35 +201,38 @@ export function registerHandlers(io: IOServer): void {
         return;
       }
 
-      if (room.auction.phase !== "lobby") {
-        callback({ success: false, error: "Auction already started. Use rejoin with your session." });
+      const phase = room.auction.phase;
+      const midGame = phase !== "lobby";
+
+      if (isNameOnline(room, io, playerName)) {
+        callback({ success: false, error: "Name already taken in this room" });
         return;
       }
+      releaseOfflineName(room, io, playerName);
 
-      const nameTaken = [...room.playerNames.values()].some(
-        (n) => n.toLowerCase() === playerName.toLowerCase()
-      );
-      if (nameTaken) { callback({ success: false, error: "Name already taken in this room" }); return; }
-
-      if (room.teams.size + room.spectators.size >= 10 && !data.spectator) {
-        callback({ success: false, error: "Room is full" }); return;
+      if (!midGame && room.teams.size + room.spectators.size >= 10 && !data.spectator) {
+        callback({ success: false, error: "Room is full" });
+        return;
       }
 
       currentRoomId = room.id;
       socket.join(room.id);
+      const asSpectator = !!data.spectator || midGame;
       const token = generateSessionToken();
       room.playerNames.set(socket.id, playerName);
       room.sessionTokens.set(socket.id, token);
-
-      if (data.spectator) {
+      if (asSpectator) {
         room.spectators.add(socket.id);
         room.tokenToSocket.set(token, { socketId: socket.id, isSpectator: true });
       } else {
         room.tokenToSocket.set(token, { socketId: socket.id, isSpectator: false });
       }
 
-      callback({ success: true, sessionToken: token });
-      addActivity(room, "system", `${playerName} joined${data.spectator ? " as spectator" : ""}`);
+      callback({ success: true, sessionToken: token, isSpectator: asSpectator });
+      const joinLabel = asSpectator
+        ? `${playerName} joined${midGame ? " — pick a team or watch" : " as spectator"}`
+        : `${playerName} joined`;
+      addActivity(room, "system", joinLabel);
       emitAuctionActivity(io, room, {
         type: "PLAYER_JOINED",
         senderId: socket.id,
@@ -221,7 +243,7 @@ export function registerHandlers(io: IOServer): void {
       socket.to(room.id).emit("player-joined", {
         playerName,
         socketId: socket.id,
-        isSpectator: !!data.spectator,
+        isSpectator: asSpectator,
       });
     });
 
@@ -237,6 +259,11 @@ export function registerHandlers(io: IOServer): void {
         callback({ success: true, sessionToken: room.sessionTokens.get(socket.id) });
         return;
       }
+      if (isNameOnline(room, io, playerName)) {
+        callback({ success: false, error: "Name already taken in this room" });
+        return;
+      }
+      releaseOfflineName(room, io, playerName);
       currentRoomId = room.id;
       socket.join(room.id);
       const token = generateSessionToken();
@@ -313,12 +340,13 @@ export function registerHandlers(io: IOServer): void {
 
       const playerName = room.playerNames.get(socket.id) || "Player";
       const existingTeamId = room.connectedPlayers.get(socket.id);
-      const vacantTeam = room.teams.get(data.teamId);
+      const team = room.teams.get(data.teamId);
 
-      if (vacantTeam?.isVacant && !existingTeamId) {
-        if (claimVacantTeam(room, data.teamId, socket.id, playerName)) {
+      if (team && !team.ownerId && !existingTeamId) {
+        if (claimOpenTeam(room, data.teamId, socket.id, playerName)) {
           const token = room.sessionTokens.get(socket.id)!;
-          addActivity(room, "system", `${playerName} took over ${vacantTeam.shortName} (squad & purse kept)`);
+          const label = team.squad.length > 0 ? "took over" : "claimed";
+          addActivity(room, "system", `${playerName} ${label} ${team.shortName}`);
           io.to(currentRoomId).emit("team-picked", {
             teamId: data.teamId, playerName, socketId: socket.id, sessionToken: token,
           });
@@ -340,9 +368,10 @@ export function registerHandlers(io: IOServer): void {
           callback?.({ success: false });
           return;
         }
-        if (addTeam(room, data.teamId, socket.id, playerName)) {
+        if (addTeamMidGame(room, data.teamId, socket.id, playerName)) {
           const token = room.sessionTokens.get(socket.id)!;
           room.tokenToSocket.set(token, { socketId: socket.id, teamId: data.teamId, isSpectator: false });
+          addActivity(room, "system", `${playerName} joined auction as ${TEAM_MAP[data.teamId]?.shortName || data.teamId}`);
           io.to(currentRoomId).emit("team-picked", {
             teamId: data.teamId, playerName, socketId: socket.id, sessionToken: token,
           });
@@ -657,7 +686,9 @@ export function registerHandlers(io: IOServer): void {
           team.isOnline = false;
           team.ownerId = "";
         }
+        room.connectedPlayers.delete(socket.id);
       }
+      room.spectators.delete(socket.id);
 
       if (playerName && room.auction.phase !== "lobby") {
         addActivity(room, "system", `${playerName} went offline — auction continues`);

@@ -18,6 +18,47 @@ export const FLEX_MAX_UNCAPPED_RETENTIONS = 2;
 
 /** Minimum base price from IPL 2025 mega auction onwards */
 export const MIN_BASE_PRICE_LAKHS = 30;
+export const MARQUEE_BASE_LAKHS = 200;
+export const VALID_CAPPED_BASE_LAKHS = [75, 100, 125, 150, 200] as const;
+export const VALID_UNCAPPED_BASE_LAKHS = [30, 40, 50, 125] as const;
+
+/** Default reserve (lakhs) when a player is not on the published auction list */
+export const SET_DEFAULT_BASE_LAKHS: Record<string, number> = {
+  M1: 200, M2: 200, BA1: 200,
+  BA2: 75, BA3: 75, BA4: 75,
+  AL1: 200, AL2: 75, AL3: 75, AL4: 75,
+  WK1: 200, WK2: 75,
+  FA1: 200, FA2: 75, FA3: 75, FA4: 75, FA5: 75,
+  SP1: 200, SP2: 75,
+};
+
+export function getDefaultBasePriceLakhs(set: string, isCapped: boolean): number {
+  if (!isCapped) return MIN_BASE_PRICE_LAKHS;
+  if (SET_DEFAULT_BASE_LAKHS[set]) return SET_DEFAULT_BASE_LAKHS[set];
+  if (set.startsWith("M")) return MARQUEE_BASE_LAKHS;
+  if (set.startsWith("U")) return MIN_BASE_PRICE_LAKHS;
+  return 75;
+}
+
+export function normalizeBasePriceLakhs(lakhs: number, set: string, isCapped: boolean): number {
+  if (set === "M1" || set === "M2") return MARQUEE_BASE_LAKHS;
+  if (!isCapped) {
+    return (VALID_UNCAPPED_BASE_LAKHS as readonly number[]).includes(lakhs)
+      ? lakhs
+      : MIN_BASE_PRICE_LAKHS;
+  }
+  return (VALID_CAPPED_BASE_LAKHS as readonly number[]).includes(lakhs)
+    ? lakhs
+    : getDefaultBasePriceLakhs(set, isCapped);
+}
+
+export function basePriceFromLakhs(lakhs: number): number {
+  return lakhs * 100000;
+}
+
+export function lakhsFromBasePrice(basePrice: number): number {
+  return Math.round(basePrice / 100000);
+}
 
 /** Capped retention purse deductions by slot order (1st–5th capped retained) */
 export const RETENTION_COSTS_CAPPED = [1800, 1400, 1100, 1800, 1400]; // ₹18/14/11/18/14 Cr
@@ -224,6 +265,7 @@ export const IPL_RULES_SUMMARY = {
   retentions: "Up to 6 combined (retentions + RTM). Max 5 capped + 2 uncapped Indian across both",
   rtmProcess: "RTM triggers escalation: winning bidder raises once, then original team must match or pass (card restored if pass)",
   retentionSlabs: "Capped: ₹18/14/11/18/14 Cr by slot · Uncapped: ₹4 Cr each",
+  basePrices: "Marquee ₹2 Cr · Capped ₹75L–₹2 Cr · Uncapped ₹30L min (30/40/50L tiers)",
   flexRetention: "Pick any players · Custom prices · Max 4 capped + 2 uncapped · Deducted from ₹120 Cr",
   bidIncrements: "₹5L (≤1Cr) · ₹10L (1–2Cr) · ₹20L (2–5Cr) · ₹25L (5Cr+)",
 };

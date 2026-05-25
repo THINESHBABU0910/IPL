@@ -96,15 +96,20 @@ export default function RoomPage() {
     setOfflineMode(false);
     setTimerSeconds(state.auction.timerSeconds);
     const socket = socketRef.current;
-    if (!myTeamIdRef.current) {
-      for (const [teamId, team] of Object.entries(state.teams)) {
-        if (team.ownerId === socket.id) {
-          setMyTeamId(teamId);
-          myTeamIdRef.current = teamId;
-          updateRecentRoomTeam(roomId, teamId, state.mode);
-          break;
-        }
+    let foundTeam = false;
+    for (const [teamId, team] of Object.entries(state.teams)) {
+      if (team.ownerId === socket.id) {
+        setMyTeamId(teamId);
+        myTeamIdRef.current = teamId;
+        setIsSpectator(false);
+        foundTeam = true;
+        updateRecentRoomTeam(roomId, teamId, state.mode);
+        break;
       }
+    }
+    if (!foundTeam) {
+      const me = state.participants.find((p) => p.socketId === socket.id);
+      if (me) setIsSpectator(me.isSpectator);
     }
     if (state.auction.phase === "completed") {
       saveRoomArchive({
@@ -158,17 +163,22 @@ export default function RoomPage() {
       if (connectedRef.current) return;
       const tryReconnect = (token?: string) => {
         socket.emit("reconnect-room", { roomId, playerName: playerName!, sessionToken: token }, (res) => {
-          if (res.success) {
-            connectedRef.current = true;
-            if (res.teamId) setMyTeamId(res.teamId);
-            if (token) saveSession({ roomId, sessionToken: token, playerName: playerName!, teamId: res.teamId });
-            toast.success("Welcome back!");
-            return;
-          }
+        if (res.success) {
+          connectedRef.current = true;
+          if (res.teamId) setMyTeamId(res.teamId);
+          if (token) saveSession({ roomId, sessionToken: token, playerName: playerName!, teamId: res.teamId, isSpectator: !res.teamId });
+          if (!res.teamId) setIsSpectator(true);
+          toast.success("Welcome back!");
+          return;
+        }
           socket.emit("join-room", { roomId, playerName: playerName!, sessionToken: token }, (res2) => {
             if (res2.success) {
               connectedRef.current = true;
-              if (res2.sessionToken) saveSession({ roomId, sessionToken: res2.sessionToken, playerName: playerName! });
+              if (res2.sessionToken) {
+                saveSession({ roomId, sessionToken: res2.sessionToken, playerName: playerName!, teamId: res2.teamId, isSpectator: res2.isSpectator });
+              }
+              if (res2.isSpectator) setIsSpectator(true);
+              if (res2.teamId) setMyTeamId(res2.teamId);
             } else {
               onFail(res2.error || res.error || "Could not join room");
             }

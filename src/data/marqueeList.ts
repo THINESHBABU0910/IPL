@@ -7,7 +7,7 @@ export const MARQUEE_M1_IDS: readonly string[] = [
 ] as const;
 
 export const MARQUEE_M2_IDS: readonly string[] = [
-  "P387", "P511", "P434", "P512", "P538", "P476", "P475", "P029", "P030", "P392", "P452", "P516", "P448", "P378", "P471", "P427", "P456", "P008", "P010", "P011", "P013", "P473", "P528", "P520", "P461"
+  "P387", "P511", "P434", "P512", "P538", "P476", "P475", "P029", "P030", "P392", "P452", "P516", "P448", "P378", "P471", "P427", "P456", "P008", "P010", "P011", "P013", "P473", "P528", "P002", "P461"
 ] as const;
 
 export const MARQUEE_PLAYER_IDS: readonly string[] = [

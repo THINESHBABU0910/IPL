@@ -162,8 +162,17 @@ export default function RetentionPhase({ roomState, myTeamId, socket }: Retentio
     return (
       <div className="panel-fill flex items-center justify-center px-4">
         <p className="text-center text-gray-400 text-sm">
-          Pick a free team above to set retentions, or skip when you join a team.
+          Pick a free team above to join. Retention is closed — you bid in the auction with full purse & RTM per mode rules.
         </p>
+      </div>
+    );
+  }
+
+  if (isLocked && myTeam && myTeam.retainedPlayers.length === 0 && roomState.auction.phase === "retention") {
+    return (
+      <div className="panel-fill flex flex-col items-center justify-center px-4 gap-2">
+        <p className="text-center text-gray-300 text-sm font-semibold">Retention skipped for {myTeam.shortName}</p>
+        <p className="text-center text-gray-500 text-xs">Full ₹120 Cr purse · waiting for other teams to lock</p>
       </div>
     );
   }

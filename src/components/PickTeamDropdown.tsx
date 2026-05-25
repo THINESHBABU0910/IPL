@@ -30,8 +30,10 @@ export default function PickTeamDropdown({ roomState, myTeamId, socket }: PickTe
       <option value="" disabled>Pick Team</option>
       {IPL_TEAMS.map((t) => {
         const team = roomState.teams[t.id];
-        const canPick = !team?.ownerId || team.isVacant;
-        const label = team?.isVacant ? `${t.shortName} (OPEN)` : canPick ? t.shortName : `${t.shortName} (taken)`;
+        const canPick = !team || !team.ownerId || team.isVacant;
+        const label = !team || !team.ownerId || team.isVacant
+          ? `${t.shortName} (OPEN)`
+          : `${t.shortName} (taken)`;
         return (
           <option key={t.id} value={t.id} disabled={!canPick}>
             {label}

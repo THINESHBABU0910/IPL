@@ -633,8 +633,15 @@ export function canStartAuction(room: Room, byHost: boolean): { ok: boolean; rea
 export function claimVacantTeam(
   room: Room, teamId: string, socketId: string, playerName: string,
 ): boolean {
+  return claimOpenTeam(room, teamId, socketId, playerName);
+}
+
+/** Claim a franchise with no active owner (vacant or offline-left). Keeps squad & purse. */
+export function claimOpenTeam(
+  room: Room, teamId: string, socketId: string, playerName: string,
+): boolean {
   const team = room.teams.get(teamId);
-  if (!team?.isVacant) return false;
+  if (!team || team.ownerId) return false;
   if (room.connectedPlayers.has(socketId)) return false;
 
   team.isVacant = false;
@@ -644,11 +651,37 @@ export function claimVacantTeam(
   room.connectedPlayers.set(socketId, teamId);
   room.spectators.delete(socketId);
 
+  if (room.auction.phase === "retention" && !team.retentionLocked) {
+    team.retentionLocked = true;
+    team.rtmCards = getInitialRtmCards(room.mode, team.retainedPlayers.length);
+  }
+
   const token = room.sessionTokens.get(socketId);
   if (token) {
     room.tokenToSocket.set(token, { socketId, teamId, isSpectator: false });
   }
   return true;
+}
+
+/** Fresh franchise mid-retention/auction — no retention, RTM per mode rules. */
+export function addTeamMidGame(
+  room: Room, teamId: string, socketId: string, playerName: string,
+): boolean {
+  if (!addTeam(room, teamId, socketId, playerName)) return false;
+  const team = room.teams.get(teamId)!;
+  team.retentionLocked = true;
+  team.retainedPlayers = [];
+  team.retentionPrices = undefined;
+  team.purse = TOTAL_PURSE;
+  team.rtmCards = getInitialRtmCards(room.mode, 0);
+  return true;
+}
+
+export function releaseOfflinePlayerSlot(room: Room, oldSocketId: string): void {
+  room.playerNames.delete(oldSocketId);
+  room.sessionTokens.delete(oldSocketId);
+  room.connectedPlayers.delete(oldSocketId);
+  room.spectators.delete(oldSocketId);
 }
 
 export function kickTeamOwner(room: Room, teamId: string): { ownerName: string; socketId?: string } | null {
@@ -715,10 +748,15 @@ export function reconnectByToken(
       room.spectators.add(newSocketId);
       return { isSpectator: true, playerName: name };
     }
+    if (team?.ownerId && team.ownerId !== newSocketId) {
+      room.spectators.add(newSocketId);
+      return { isSpectator: true, playerName: name };
+    }
     room.connectedPlayers.set(newSocketId, entry.teamId);
     if (team) {
       team.ownerId = newSocketId;
       team.isOnline = true;
+      team.isVacant = false;
     }
     return { teamId: entry.teamId, isSpectator: false, playerName: name };
   }
