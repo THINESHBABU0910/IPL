@@ -958,6 +958,17 @@ export function importRoomFromSnapshot(raw: Record<string, unknown>): Room | nul
       team.ownerId = "";
     }
 
+    if (room.tokenToSocket.size === 0 && room.sessionTokens.size > 0) {
+      for (const [socketId, token] of room.sessionTokens) {
+        const teamId = room.connectedPlayers.get(socketId);
+        room.tokenToSocket.set(token, {
+          socketId,
+          teamId,
+          isSpectator: room.spectators.has(socketId),
+        });
+      }
+    }
+
     rooms.set(id, room);
     return room;
   } catch (e) {

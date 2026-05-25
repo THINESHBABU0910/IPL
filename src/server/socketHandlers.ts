@@ -88,10 +88,10 @@ function resolveRoom(roomId: string): Room | undefined {
 
 function scheduleCleanup(io: IOServer, room: Room): void {
   if (room.cleanupTimer) clearTimeout(room.cleanupTimer);
-  if (room.auction.phase === "completed") return;
+  if (room.auction.phase !== "lobby") return;
   room.cleanupTimer = setTimeout(() => {
     const r = getRoom(room.id);
-    if (!r || r.auction.phase === "completed") return;
+    if (!r || r.auction.phase !== "lobby") return;
     let anyConnected = false;
     for (const sid of r.connectedPlayers.keys()) {
       if (io.sockets.sockets.has(sid)) { anyConnected = true; break; }
@@ -148,8 +148,10 @@ export function registerHandlers(io: IOServer): void {
         if (restored) {
           currentRoomId = room.id;
           socket.join(room.id);
-          callback({ success: true, sessionToken: data.sessionToken });
+          callback({ success: true, sessionToken: data.sessionToken, teamId: restored.teamId });
           socket.emit("session-restored", { teamId: restored.teamId, sessionToken: data.sessionToken, isSpectator: restored.isSpectator });
+          addActivity(room, "system", `${restored.playerName} rejoined`);
+          socket.emit("room-state", serializeRoom(room, io));
           socket.emit("activity-feed", [...room.auctionActivities].reverse());
           broadcastState(io, room);
           return;
@@ -244,6 +246,9 @@ export function registerHandlers(io: IOServer): void {
             sessionToken: data.sessionToken,
             isSpectator: restored.isSpectator,
           });
+          addActivity(room, "system", `${restored.playerName} rejoined`);
+          socket.emit("room-state", serializeRoom(room, io));
+          socket.emit("activity-feed", [...room.auctionActivities].reverse());
           broadcastState(io, room);
           return;
         }
@@ -529,22 +534,19 @@ export function registerHandlers(io: IOServer): void {
       const room = getRoom(currentRoomId);
       if (!room) return;
 
-      if (room.auction.phase === "lobby") {
-        const teamId = removeTeam(room, socket.id);
-        if (teamId) {
-          io.to(currentRoomId).emit("player-left", { teamId, playerName: "" });
-          broadcastState(io, room);
-        } else {
-          room.playerNames.delete(socket.id);
-          room.spectators.delete(socket.id);
-          room.sessionTokens.delete(socket.id);
+      const playerName = room.playerNames.get(socket.id);
+      const teamId = room.connectedPlayers.get(socket.id);
+
+      if (teamId) {
+        const team = room.teams.get(teamId);
+        if (team) {
+          team.isOnline = false;
+          team.ownerId = "";
         }
-      } else {
-        const teamId = room.connectedPlayers.get(socket.id);
-        if (teamId) {
-          const team = room.teams.get(teamId);
-          if (team) team.isOnline = false;
-        }
+      }
+
+      if (playerName && room.auction.phase !== "lobby") {
+        addActivity(room, "system", `${playerName} went offline — auction continues`);
       }
 
       if (room.hostSocketId === socket.id) {

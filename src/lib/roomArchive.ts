@@ -42,6 +42,19 @@ export function listRoomArchives(): RoomArchiveEntry[] {
   return readAll();
 }
 
+export function saveRoomProgress(entry: Omit<RoomArchiveEntry, "savedAt">): void {
+  saveRoomArchive(entry);
+}
+
+export function getRestorableArchive(roomId: string): RoomArchiveEntry | null {
+  return getRoomArchive(roomId);
+}
+
 export function isCompletedArchive(entry: RoomArchiveEntry): boolean {
   return entry.roomState.auction.phase === "completed";
+}
+
+export function isActiveArchive(entry: RoomArchiveEntry): boolean {
+  const phase = entry.roomState.auction.phase;
+  return phase === "auction" || phase === "retention" || phase === "lobby";
 }

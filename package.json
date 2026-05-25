@@ -11,6 +11,7 @@
     "start": "npx ts-node --project tsconfig.server.json server.ts",
     "lint": "next lint",
     "generate-players": "node scripts/generate-players-2026.mjs",
+    "sync-squads": "node scripts/sync-squad-teams-2026.mjs",
     "download-logos": "node scripts/download-logos.mjs"
   },
   "dependencies": {

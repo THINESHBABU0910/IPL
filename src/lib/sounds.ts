@@ -44,8 +44,15 @@ export function playUnsoldSound(): void {
   playTone(220, 0.3, "sawtooth", 0.06);
 }
 
-export function playTimerWarning(): void {
-  playTone(880, 0.08, "triangle", 0.04);
+export function playTimerWarning(secondsLeft?: number): void {
+  const sec = secondsLeft ?? 5;
+  const freq = sec <= 2 ? 1100 : sec <= 3 ? 950 : 820;
+  const vol = sec <= 2 ? 0.09 : 0.07;
+  playTone(freq, 0.1, "square", vol);
+}
+
+export function playTimerFinalBeep(): void {
+  playTone(1200, 0.15, "square", 0.1);
 }
 
 export function playRTMSound(): void {

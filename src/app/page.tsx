@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { getSocket } from "@/lib/socket";
 import { AuctionMode } from "@/lib/types";
 import { TEAM_MAP } from "@/data/teams";
-import { saveSession } from "@/lib/session";
+import { saveSession, getSessionForRoom } from "@/lib/session";
 import { listRoomArchives, isCompletedArchive } from "@/lib/roomArchive";
 import { isValidPlayerName, normalizePlayerName } from "@/lib/validateName";
 
@@ -107,12 +107,30 @@ export default function HomePage() {
     setLoading(true);
     setError("");
     const code = joinCode.trim().toUpperCase();
-    getSocket().emit("join-room", { roomId: code, playerName: trimmed }, (res) => {
+    const stored = getSessionForRoom(code);
+    getSocket().emit("join-room", {
+      roomId: code,
+      playerName: trimmed,
+      sessionToken: stored?.sessionToken,
+    }, (res) => {
       setLoading(false);
       if (res.success) {
         localStorage.setItem("playerName", trimmed);
-        if (res.sessionToken) saveSession({ roomId: code, sessionToken: res.sessionToken, playerName: trimmed });
-        saveRecentRoom({ roomId: code, teamId: "", playerName: trimmed, mode: "", joinedAt: Date.now() });
+        if (res.sessionToken) {
+          saveSession({
+            roomId: code,
+            sessionToken: res.sessionToken,
+            playerName: trimmed,
+            teamId: res.teamId,
+          });
+        }
+        saveRecentRoom({
+          roomId: code,
+          teamId: res.teamId || stored?.teamId || "",
+          playerName: trimmed,
+          mode: "",
+          joinedAt: Date.now(),
+        });
         router.push(`/room/${code}`);
       } else setError(res.error || "Failed");
     });

@@ -20,10 +20,10 @@ import UpcomingPlayersModal from "@/components/UpcomingPlayersModal";
 import LobbyTeamGrid from "@/components/LobbyTeamGrid";
 import { Toaster, toast } from "sonner";
 import { saveSession, getSessionForRoom } from "@/lib/session";
-import { saveRoomArchive, getRoomArchive, isCompletedArchive } from "@/lib/roomArchive";
+import { saveRoomArchive, getRoomArchive, isCompletedArchive, saveRoomProgress } from "@/lib/roomArchive";
 import { isValidPlayerName, normalizePlayerName } from "@/lib/validateName";
 import {
-  playBidSound, playSoldSound, playUnsoldSound, playRTMSound, playTimerWarning, isSoundEnabled, setSoundEnabled,
+  playBidSound, playSoldSound, playUnsoldSound, playRTMSound, playTimerWarning, playTimerFinalBeep, isSoundEnabled, setSoundEnabled,
 } from "@/lib/sounds";
 
 function updateRecentRoomTeam(roomId: string, teamId: string, mode: string): void {
@@ -106,6 +106,13 @@ export default function RoomPage() {
         playerName: playerName || undefined,
         teamId: myTeamIdRef.current || undefined,
       });
+    } else {
+      saveRoomProgress({
+        roomId: state.id,
+        roomState: state,
+        playerName: playerName || undefined,
+        teamId: myTeamIdRef.current || undefined,
+      });
     }
   }, [roomId, playerName]);
 
@@ -122,14 +129,17 @@ export default function RoomPage() {
 
     function onFail(err: string) {
       const archive = getRoomArchive(roomId);
-      if (archive && isCompletedArchive(archive)) {
+      if (archive) {
         setOfflineMode(true);
         setRoomState(archive.roomState);
         if (archive.teamId) {
           setMyTeamId(archive.teamId);
           myTeamIdRef.current = archive.teamId;
         }
-        toast.message("Showing saved auction results from your device");
+        const msg = isCompletedArchive(archive)
+          ? "Showing saved auction results from your device"
+          : "Reconnecting from saved game on your device — server may be waking up";
+        toast.message(msg);
         return;
       }
       setConnectError(err);
@@ -145,6 +155,7 @@ export default function RoomPage() {
             connectedRef.current = true;
             if (res.teamId) setMyTeamId(res.teamId);
             if (token) saveSession({ roomId, sessionToken: token, playerName: playerName!, teamId: res.teamId });
+            toast.success("Welcome back!");
             return;
           }
           socket.emit("join-room", { roomId, playerName: playerName!, sessionToken: token }, (res2) => {
@@ -195,8 +206,11 @@ export default function RoomPage() {
     socket.on("rtm-used", (data) => { setRtmInfo(null); playSoldSound(); });
     socket.on("rtm-declined", () => setRtmInfo(null));
     socket.on("timer-tick", ({ seconds, type }) => {
-      if (type === "auction") setTimerSeconds(seconds);
-      if (type === "auction" && seconds <= 3) playTimerWarning();
+      if (type === "auction") {
+        setTimerSeconds(seconds);
+        if (seconds <= 5 && seconds >= 1) playTimerWarning(seconds);
+        if (seconds === 0) playTimerFinalBeep();
+      }
     });
     socket.on("phase-change", ({ phase }) => {
       if (phase === "lobby") { setMyTeamId(null); myTeamIdRef.current = null; setActiveTab("players"); }
