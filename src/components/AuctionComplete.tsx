@@ -11,6 +11,7 @@ interface AuctionCompleteProps {
   roomState: RoomState;
   socket?: Socket;
   isHost?: boolean;
+  myTeamId?: string | null;
 }
 
 const ROLE_COLORS: Record<string, string> = {
@@ -20,7 +21,7 @@ const ROLE_COLORS: Record<string, string> = {
   WICKETKEEPER: "#22c55e",
 };
 
-export default function AuctionComplete({ roomState, socket, isHost }: AuctionCompleteProps) {
+export default function AuctionComplete({ roomState, socket, isHost, myTeamId }: AuctionCompleteProps) {
   const [expandedTeam, setExpandedTeam] = useState<string | null>(null);
   const teams = Object.entries(roomState.teams);
 
@@ -65,8 +66,15 @@ export default function AuctionComplete({ roomState, socket, isHost }: AuctionCo
           AUCTION COMPLETE
         </h1>
         <p className="text-gray-400">
-          {allSold.length} players sold &bull; {roomState.auction.unsoldPlayers.length} unsold
+          IPL 2026 · {allSold.length} players sold &bull; {roomState.auction.unsoldPlayers.length} unsold
         </p>
+        {myTeamId && roomState.teams[myTeamId] && (
+          <p className="text-sm text-[#FFD700] mt-2">
+            Your squad: {roomState.teams[myTeamId].shortName} ·{" "}
+            {roomState.teams[myTeamId].squad.length + roomState.teams[myTeamId].retainedPlayers.length} players ·{" "}
+            Spent {formatPrice(TOTAL_PURSE - roomState.teams[myTeamId].purse)}
+          </p>
+        )}
       </motion.div>
 
       {/* MVP Stats */}

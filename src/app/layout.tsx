@@ -1,9 +1,10 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
+import KeepAliveProvider from "@/components/KeepAliveProvider";
 
 export const metadata: Metadata = {
-  title: "IPL Auction Game",
-  description: "Play IPL Auction with your friends - Real-time multiplayer bidding game",
+  title: "IPL 2026 Auction Game",
+  description: "Play IPL 2026 Auction with friends — real-time multiplayer bidding",
 };
 
 export const viewport: Viewport = {
@@ -17,7 +18,9 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body className="bg-ipl-dark antialiased">{children}</body>
+      <body className="bg-ipl-dark antialiased">
+        <KeepAliveProvider>{children}</KeepAliveProvider>
+      </body>
     </html>
   );
 }

@@ -6,6 +6,7 @@ import { getSocket } from "@/lib/socket";
 import { AuctionMode } from "@/lib/types";
 import { TEAM_MAP } from "@/data/teams";
 import { saveSession } from "@/lib/session";
+import { listRoomArchives, isCompletedArchive } from "@/lib/roomArchive";
 import { isValidPlayerName, normalizePlayerName } from "@/lib/validateName";
 
 interface RecentRoom {
@@ -123,10 +124,10 @@ export default function HomePage() {
         <div className="text-center">
           <h1 className="text-xl font-black tracking-tight">
             <span className="bg-gradient-to-r from-ipl-gold via-yellow-300 to-ipl-gold bg-clip-text text-transparent animate-shimmer bg-[length:200%_100%]">
-              IPL AUCTION
+              IPL 2026 AUCTION
             </span>
           </h1>
-          <p className="text-[9px] text-gray-500 tracking-[0.25em] uppercase -mt-0.5">Live Multiplayer</p>
+          <p className="text-[9px] text-gray-500 tracking-[0.25em] uppercase -mt-0.5">539 Players · Live Multiplayer</p>
         </div>
       </header>
 
@@ -226,6 +227,8 @@ export default function HomePage() {
             ) : (
               recentRooms.map((room) => {
                 const teamDef = room.teamId ? TEAM_MAP[room.teamId] : null;
+                const archive = listRoomArchives().find((a) => a.roomId === room.roomId);
+                const completed = archive ? isCompletedArchive(archive) : false;
                 return (
                   <button
                     key={room.roomId}
@@ -234,6 +237,9 @@ export default function HomePage() {
                     className="w-full flex items-center gap-3 p-3.5 rounded-2xl border border-ipl-border/60 bg-ipl-card/50 text-left hover:border-ipl-gold/40 transition"
                   >
                     <span className="font-mono text-base font-bold text-ipl-gold">{room.roomId}</span>
+                    {completed && (
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-green-900/40 text-green-300">Completed</span>
+                    )}
                     {room.mode && (
                       <span className="text-[10px] px-2 py-0.5 rounded-full bg-ipl-purple/40 text-gray-300">
                         {MODE_LABELS[room.mode] || room.mode}

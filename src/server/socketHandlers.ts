@@ -17,7 +17,7 @@ import {
 import { isValidPlayerName, normalizePlayerName } from "../lib/validateName";
 import { getInitialRtmCards, isRetentionMode } from "../lib/iplRules";
 import { withRoomLock } from "./roomLock";
-import { saveRoomSnapshot, deleteRoomSnapshot } from "./roomPersistence";
+import { saveRoomSnapshot, deleteRoomSnapshot, hydrateRoomsFromSnapshots, tryRestoreRoom } from "./roomPersistence";
 
 type IOServer = Server<ClientToServerEvents, ServerToClientEvents>;
 type IOSocket = Socket<ClientToServerEvents, ServerToClientEvents>;
@@ -82,11 +82,16 @@ function broadcastState(io: IOServer, room: Room): void {
   saveRoomSnapshot(room);
 }
 
+function resolveRoom(roomId: string): Room | undefined {
+  return getRoom(roomId) ?? tryRestoreRoom(roomId) ?? undefined;
+}
+
 function scheduleCleanup(io: IOServer, room: Room): void {
   if (room.cleanupTimer) clearTimeout(room.cleanupTimer);
+  if (room.auction.phase === "completed") return;
   room.cleanupTimer = setTimeout(() => {
     const r = getRoom(room.id);
-    if (!r) return;
+    if (!r || r.auction.phase === "completed") return;
     let anyConnected = false;
     for (const sid of r.connectedPlayers.keys()) {
       if (io.sockets.sockets.has(sid)) { anyConnected = true; break; }
@@ -106,6 +111,8 @@ function isJoined(room: Room, socketId: string): boolean {
 }
 
 export function registerHandlers(io: IOServer): void {
+  hydrateRoomsFromSnapshots();
+
   io.on("connection", (socket: IOSocket) => {
     let currentRoomId: string | null = null;
 
@@ -127,7 +134,7 @@ export function registerHandlers(io: IOServer): void {
     });
 
     socket.on("join-room", (data, callback) => {
-      const room = getRoom(data.roomId);
+      const room = resolveRoom(data.roomId);
       if (!room) { callback({ success: false, error: "Room not found" }); return; }
 
       const playerName = normalizePlayerName(data.playerName || "");
@@ -199,7 +206,7 @@ export function registerHandlers(io: IOServer): void {
     });
 
     socket.on("join-as-spectator", (data, callback) => {
-      const room = getRoom(data.roomId);
+      const room = resolveRoom(data.roomId);
       if (!room) { callback({ success: false, error: "Room not found" }); return; }
       const playerName = normalizePlayerName(data.playerName || "");
       if (!isValidPlayerName(playerName)) {
@@ -223,7 +230,7 @@ export function registerHandlers(io: IOServer): void {
     });
 
     socket.on("reconnect-room", (data, callback) => {
-      const room = getRoom(data.roomId);
+      const room = resolveRoom(data.roomId);
       if (!room) { callback({ success: false, error: "Room not found" }); return; }
 
       if (data.sessionToken) {

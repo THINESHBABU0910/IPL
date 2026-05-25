@@ -1,6 +1,5 @@
 /**
- * Top 35 Marquee players — IPL mega auction tier (BA1).
- * Updated from IPL 2025 official marquee + elite talent across all roles.
+ * Top 35 Marquee players — IPL 2026 mega auction tier (BA1).
  * Regenerate players.json with: node scripts/updateMarqueeList.mjs
  */
 export const MARQUEE_PLAYER_IDS: readonly string[] = [

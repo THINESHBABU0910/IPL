@@ -20,6 +20,7 @@ import UpcomingPlayersModal from "@/components/UpcomingPlayersModal";
 import LobbyTeamGrid from "@/components/LobbyTeamGrid";
 import { Toaster, toast } from "sonner";
 import { saveSession, getSessionForRoom } from "@/lib/session";
+import { saveRoomArchive, getRoomArchive, isCompletedArchive } from "@/lib/roomArchive";
 import { isValidPlayerName, normalizePlayerName } from "@/lib/validateName";
 import {
   playBidSound, playSoldSound, playUnsoldSound, playRTMSound, playTimerWarning, isSoundEnabled, setSoundEnabled,
@@ -53,6 +54,7 @@ export default function RoomPage() {
   const [myTeamId, setMyTeamId] = useState<string | null>(null);
   const [isSpectator, setIsSpectator] = useState(false);
   const [connectError, setConnectError] = useState("");
+  const [offlineMode, setOfflineMode] = useState(false);
   const [soundOn, setSoundOn] = useState(true);
   const [playerName, setPlayerName] = useState<string | null>(null);
   const [nameConfirmed, setNameConfirmed] = useState(false);
@@ -84,6 +86,7 @@ export default function RoomPage() {
 
   const mergeRoomState = useCallback((state: RoomState) => {
     setRoomState(state);
+    setOfflineMode(false);
     setTimerSeconds(state.auction.timerSeconds);
     const socket = socketRef.current;
     if (!myTeamIdRef.current) {
@@ -96,7 +99,15 @@ export default function RoomPage() {
         }
       }
     }
-  }, [roomId]);
+    if (state.auction.phase === "completed") {
+      saveRoomArchive({
+        roomId: state.id,
+        roomState: state,
+        playerName: playerName || undefined,
+        teamId: myTeamIdRef.current || undefined,
+      });
+    }
+  }, [roomId, playerName]);
 
   const appendChat = useCallback((msg: ChatMessage) => {
     setRoomState((prev) => prev ? { ...prev, chat: [...prev.chat, msg] } : prev);
@@ -110,6 +121,17 @@ export default function RoomPage() {
     const stored = getSessionForRoom(roomId);
 
     function onFail(err: string) {
+      const archive = getRoomArchive(roomId);
+      if (archive && isCompletedArchive(archive)) {
+        setOfflineMode(true);
+        setRoomState(archive.roomState);
+        if (archive.teamId) {
+          setMyTeamId(archive.teamId);
+          myTeamIdRef.current = archive.teamId;
+        }
+        toast.message("Showing saved auction results from your device");
+        return;
+      }
       setConnectError(err);
       toast.error(err);
       setTimeout(() => router.push("/"), 3000);
@@ -306,7 +328,8 @@ export default function RoomPage() {
           <div className="min-w-0">
             <div className="flex items-center gap-1.5">
               <span className="font-mono text-sm font-black text-[#FFD700]">{roomId}</span>
-              <span className="w-1.5 h-1.5 rounded-full bg-green-400 shrink-0" />
+              {!offlineMode && <span className="w-1.5 h-1.5 rounded-full bg-green-400 shrink-0" />}
+              {offlineMode && <span className="ref-pill ref-pill-orange text-[8px]">SAVED</span>}
               <span className="text-[10px] text-gray-400">{participantCount}/10</span>
             </div>
           </div>
@@ -451,7 +474,7 @@ export default function RoomPage() {
 
         {phase === "completed" && activeTab === "results" && (
           <div className="scroll-panel">
-            <AuctionComplete roomState={roomState} socket={socketRef.current} isHost={!!isHost} />
+            <AuctionComplete roomState={roomState} socket={socketRef.current} isHost={!!isHost} myTeamId={myTeamId} />
           </div>
         )}
         {phase === "completed" && activeTab === "squad" && (

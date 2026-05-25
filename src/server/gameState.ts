@@ -909,6 +909,63 @@ export function serializeRoom(room: Room, io?: { sockets: { sockets: Map<string,
 
 
 
+export function importRoomFromSnapshot(raw: Record<string, unknown>): Room | null {
+  try {
+    const id = String(raw.id).toUpperCase();
+    if (rooms.has(id)) return rooms.get(id)!;
+
+    const auctionRaw = { ...(raw.auction as Record<string, unknown>) };
+    const remainingIds = (auctionRaw.remainingPoolIds as string[]) || [];
+    delete auctionRaw.remainingPoolIds;
+
+    loadPlayersFromDisk();
+    const remainingPool = remainingIds
+      .map((pid) => playerByIdCache?.get(pid))
+      .filter((p): p is Player => !!p);
+
+    const room: Room = {
+      id,
+      mode: raw.mode as AuctionMode,
+      teams: new Map(Object.entries((raw.teams as Record<string, TeamState>) || {})),
+      auction: { ...(auctionRaw as unknown as AuctionState), remainingPool },
+      connectedPlayers: new Map(Object.entries((raw.connectedPlayers as Record<string, string>) || {})),
+      playerNames: new Map(Object.entries((raw.playerNames as Record<string, string>) || {})),
+      sessionTokens: new Map(Object.entries((raw.sessionTokens as Record<string, string>) || {})),
+      tokenToSocket: new Map(
+        Object.entries(
+          (raw.tokenToSocket as Record<string, { socketId: string; teamId?: string; isSpectator: boolean }>) || {},
+        ),
+      ),
+      spectators: new Set((raw.spectators as string[]) || []),
+      hostId: String(raw.hostId || ""),
+      hostName: String(raw.hostName || "Host"),
+      hostSocketId: "",
+      chat: (raw.chat as ChatMessage[]) || [],
+      activityFeed: (raw.activityFeed as ActivityEntry[]) || [],
+      auctionActivities: [],
+      timerInterval: null,
+      rtmTimerInterval: null,
+      retentionTimerInterval: null,
+      cleanupTimer: null,
+      retentionTimeLeft: Number(raw.retentionTimeLeft) || 0,
+      minTeamsToStart: Number(raw.minTeamsToStart) || 2,
+      createdAt: Number(raw.createdAt) || Date.now(),
+      poolMeta: (raw.poolMeta as PoolMeta) || null,
+    };
+
+    for (const team of room.teams.values()) {
+      team.isOnline = false;
+      team.ownerId = "";
+    }
+
+    rooms.set(id, room);
+    return room;
+  } catch (e) {
+    console.error("importRoomFromSnapshot failed:", e);
+    return null;
+  }
+}
+
 export type { TeamDef };
 
 export { loadPlayersFromDisk, IPL_TEAMS as TEAM_DEFS, rooms };

@@ -2,9 +2,11 @@
 
 import { useState } from "react";
 import { RoomState } from "@/lib/types";
-import { formatPrice, MAX_OVERSEAS, TOTAL_PURSE } from "@/lib/constants";
+import { formatPrice, MAX_OVERSEAS, TOTAL_PURSE, MAX_SQUAD_SIZE } from "@/lib/constants";
 import TeamLogo from "./TeamLogo";
 import { IPL_TEAMS } from "@/data/teams";
+import { shareSquadImage } from "@/lib/squadShareImage";
+import { toast } from "sonner";
 
 interface SquadTabProps {
   roomState: RoomState;
@@ -24,6 +26,7 @@ const ROLE_LABELS: Record<string, string> = {
 export default function SquadTab({ roomState, myTeamId, playerName, isHost }: SquadTabProps) {
   const teamIds = IPL_TEAMS.map((t) => t.id).filter((id) => roomState.teams[id]);
   const [activeId, setActiveId] = useState(myTeamId && roomState.teams[myTeamId] ? myTeamId : teamIds[0] || "CSK");
+  const [sharing, setSharing] = useState(false);
   const team = roomState.teams[activeId];
   if (!team) return null;
 
@@ -31,6 +34,15 @@ export default function SquadTab({ roomState, myTeamId, playerName, isHost }: Sq
   const overseas = allPlayers.filter((p) => p.isOverseas).length;
   const spent = TOTAL_PURSE - team.purse;
   const isMine = activeId === myTeamId;
+  const retainedIds = new Set(team.retainedPlayers.map((p) => p.id));
+
+  const soldPrices: Record<string, number> = {};
+  for (const sale of roomState.auction.soldPlayers) {
+    if (sale.teamId === activeId) soldPrices[sale.player.id] = sale.price;
+  }
+  for (const p of team.retainedPlayers) {
+    soldPrices[p.id] = p.basePriceLakhs;
+  }
 
   const grouped = ROLE_ORDER.map((role) => ({
     role,
@@ -39,6 +51,32 @@ export default function SquadTab({ roomState, myTeamId, playerName, isHost }: Sq
   })).filter((g) => g.players.length > 0);
 
   const retained = team.retainedPlayers;
+  const pursePct = Math.min(100, (spent / TOTAL_PURSE) * 100);
+
+  async function handleShareSquad() {
+    if (allPlayers.length === 0) {
+      toast.error("Add players to your squad before sharing");
+      return;
+    }
+    setSharing(true);
+    try {
+      const result = await shareSquadImage({
+        teamName: team.name,
+        shortName: team.shortName,
+        ownerName: isMine ? (playerName || team.ownerName) : team.ownerName,
+        primaryColor: team.primaryColor,
+        purseLeft: team.purse,
+        players: allPlayers,
+        soldPrices,
+        retainedIds,
+      }, `${team.shortName}-ipl2026-squad.png`);
+      toast.success(result === "shared" ? "Squad shared!" : "Squad image downloaded!");
+    } catch {
+      toast.error("Could not share squad image");
+    } finally {
+      setSharing(false);
+    }
+  }
 
   return (
     <div className="panel-fill px-2 pb-1 min-h-0">
@@ -71,14 +109,47 @@ export default function SquadTab({ roomState, myTeamId, playerName, isHost }: Sq
                 {isMine && <span className="ref-pill ref-pill-gold text-[8px]">YOU</span>}
                 {isMine && isHost && <span className="ref-pill ref-pill-purple text-[8px]">HOST</span>}
               </div>
-              <div className="text-[10px] text-gray-400">{team.name} · {allPlayers.length} players</div>
+              <div className="text-[10px] text-gray-400">{team.name} · IPL 2026 · {allPlayers.length}/{MAX_SQUAD_SIZE} players</div>
             </div>
           </div>
-          <div className="flex gap-3 text-[11px]">
-            <span className="text-gray-400">OS: <span className="text-white font-bold">{overseas}/{MAX_OVERSEAS}</span></span>
-            <span className="text-gray-400">Purse: <span className="text-[#22C55E] font-bold">{formatPrice(team.purse)}</span></span>
-            <span className="text-gray-400">Spent: <span className="text-[#FFD700] font-bold">{formatPrice(spent)}</span></span>
+
+          <div className="grid grid-cols-3 gap-2 text-center mb-2">
+            <div className="rounded-lg bg-black/30 px-2 py-1.5">
+              <div className="text-[9px] text-gray-500 uppercase">Total Purse</div>
+              <div className="text-sm font-bold text-white">{formatPrice(TOTAL_PURSE)}</div>
+            </div>
+            <div className="rounded-lg bg-black/30 px-2 py-1.5">
+              <div className="text-[9px] text-gray-500 uppercase">Spent</div>
+              <div className="text-sm font-bold text-[#FFD700]">{formatPrice(spent)}</div>
+            </div>
+            <div className="rounded-lg bg-black/30 px-2 py-1.5">
+              <div className="text-[9px] text-gray-500 uppercase">Remaining</div>
+              <div className="text-sm font-bold text-[#22C55E]">{formatPrice(team.purse)}</div>
+            </div>
           </div>
+
+          <div className="h-1.5 rounded-full bg-black/40 overflow-hidden mb-2">
+            <div
+              className="h-full rounded-full bg-gradient-to-r from-[#FFD700] to-orange-500 transition-all"
+              style={{ width: `${pursePct}%` }}
+            />
+          </div>
+
+          <div className="flex gap-3 text-[11px] mb-2">
+            <span className="text-gray-400">OS: <span className="text-white font-bold">{overseas}/{MAX_OVERSEAS}</span></span>
+            <span className="text-gray-400">Squad: <span className="text-white font-bold">{allPlayers.length}/{MAX_SQUAD_SIZE}</span></span>
+          </div>
+
+          {(isMine || roomState.auction.phase === "completed") && (
+            <button
+              type="button"
+              onClick={handleShareSquad}
+              disabled={sharing || allPlayers.length === 0}
+              className="w-full py-2.5 rounded-xl border border-[#FFD700]/40 text-[#FFD700] text-xs font-bold disabled:opacity-40"
+            >
+              {sharing ? "Creating image..." : "📸 Share Squad Image"}
+            </button>
+          )}
         </div>
 
         {retained.length > 0 && (
@@ -120,7 +191,7 @@ export default function SquadTab({ roomState, myTeamId, playerName, isHost }: Sq
         })}
 
         {allPlayers.length === 0 && (
-          <p className="text-center text-gray-500 text-sm py-8">No players yet</p>
+          <p className="text-center text-gray-500 text-sm py-8">No players yet — pick your team and join the auction!</p>
         )}
       </div>
     </div>

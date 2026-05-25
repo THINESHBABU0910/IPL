@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { RoomState, Player } from "@/lib/types";
-import { formatPrice, TIMER_INITIAL } from "@/lib/constants";
+import { formatPrice, TIMER_INITIAL, TOTAL_PURSE } from "@/lib/constants";
 import { Socket } from "socket.io-client";
 import { motion } from "framer-motion";
 import { TEAM_MAP } from "@/data/teams";
@@ -112,9 +112,15 @@ export default function AuctionPlayerStrip({
 
         <div className="flex items-center gap-2 pt-0.5">
           {myTeam && (
-            <div className="shrink-0 text-[11px]">
-              <span className="text-gray-500">Purse: </span>
-              <span className="text-[#22C55E] font-bold">{formatPrice(myTeam.purse)}</span>
+            <div className="shrink-0 text-[11px] flex gap-2">
+              <span>
+                <span className="text-gray-500">Left: </span>
+                <span className="text-[#22C55E] font-bold">{formatPrice(myTeam.purse)}</span>
+              </span>
+              <span>
+                <span className="text-gray-500">Spent: </span>
+                <span className="text-[#FFD700] font-bold">{formatPrice(TOTAL_PURSE - myTeam.purse)}</span>
+              </span>
             </div>
           )}
           {myTeamId && !isSpectator && (

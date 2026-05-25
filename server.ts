@@ -16,11 +16,15 @@ app.prepare().then(() => {
 
   const io = new Server(httpServer, {
     cors: { origin: "*", methods: ["GET", "POST"] },
-    pingTimeout: 60000,
-    pingInterval: 25000,
+    pingTimeout: 120000,
+    pingInterval: 20000,
   });
 
   registerHandlers(io as any);
+
+  server.get("/api/health", (_req, res) => {
+    res.json({ ok: true, service: "ipl-auction", ts: Date.now() });
+  });
 
   server.all("*", (req: any, res: any) => {
     return handle(req, res);
@@ -29,5 +33,14 @@ app.prepare().then(() => {
   httpServer.listen(port, () => {
     console.log(`> IPL Auction Server ready on http://localhost:${port}`);
     console.log(`> Mode: ${dev ? "development" : "production"}`);
+
+    const baseUrl = process.env.RENDER_EXTERNAL_URL || process.env.KEEP_ALIVE_URL;
+    if (baseUrl) {
+      const healthUrl = `${baseUrl.replace(/\/$/, "")}/api/health`;
+      const ping = () => fetch(healthUrl).catch(() => {});
+      setTimeout(ping, 5000);
+      setInterval(ping, 10 * 60 * 1000);
+      console.log(`> Keep-alive ping scheduled: ${healthUrl}`);
+    }
   });
 });
