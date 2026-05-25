@@ -105,8 +105,10 @@ body {
   .ref-bid-btn:disabled { @apply opacity-40 cursor-not-allowed; }
 
   .ref-bid-btn-highest {
-    background: linear-gradient(135deg, #15803d, #166534);
-    color: white;
+    background: linear-gradient(135deg, #FFD700 0%, #F59E0B 50%, #D97706 100%);
+    color: #1a1a1a;
+    border: 1px solid #FFD70080;
+    font-weight: 800;
   }
 
   .ref-timer-bar {

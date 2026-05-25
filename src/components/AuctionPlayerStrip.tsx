@@ -1,11 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { RoomState, Player } from "@/lib/types";
-import { formatPrice, TIMER_INITIAL, TOTAL_PURSE } from "@/lib/constants";
+import { RoomState } from "@/lib/types";
+import { formatPrice, TOTAL_PURSE, calculateBidIncrement } from "@/lib/constants";
 import { Socket } from "socket.io-client";
-import { motion } from "framer-motion";
-import { TEAM_MAP } from "@/data/teams";
+import { motion, AnimatePresence } from "framer-motion";
+import TeamLogo from "./TeamLogo";
 
 const ROLE_LABELS: Record<string, string> = {
   BATTER: "Batsman",
@@ -16,11 +16,18 @@ const ROLE_LABELS: Record<string, string> = {
 
 function countryCode(country: string): string {
   const map: Record<string, string> = {
-    India: "IN", Australia: "AU", England: "EN", "South Africa": "SA",
-    "New Zealand": "NZ", "West Indies": "WI", Afghanistan: "AF", Bangladesh: "BD",
-    "Sri Lanka": "SL", Pakistan: "PK", Netherlands: "NL", "United States": "US",
+    India: "IND", Australia: "AUS", England: "ENG", "South Africa": "SA",
+    "New Zealand": "NZ", "West Indies": "WI", Afghanistan: "AFG", Bangladesh: "BAN",
+    "Sri Lanka": "SL", Pakistan: "PAK", Netherlands: "NL", "United States": "USA",
   };
-  return map[country] || country.slice(0, 2).toUpperCase();
+  return map[country] || country.slice(0, 3).toUpperCase();
+}
+
+function hammerCall(seconds: number): string | null {
+  if (seconds === 5) return "ONCE";
+  if (seconds === 3) return "TWICE";
+  if (seconds === 1) return "FINAL!";
+  return null;
 }
 
 interface AuctionPlayerStripProps {
@@ -43,24 +50,32 @@ export default function AuctionPlayerStrip({
   const currentPlayer = auction.currentPlayer;
   const isMyBid = auction.currentBidder === myTeamId;
   const nextAmount = auction.currentBidder ? auction.nextBidAmount : (currentPlayer?.basePriceLakhs ?? 0);
+  const leadingTeam = auction.currentBidder ? roomState.teams[auction.currentBidder] : null;
 
   useEffect(() => {
     setBidPending(false);
     if (bidTimeoutRef.current) clearTimeout(bidTimeoutRef.current);
   }, [auction.currentBid, auction.currentBidder]);
 
-  const canBid = !isSpectator && myTeam && currentPlayer && !isMyBid && !bidPending && !auction.isPaused &&
+  const lotTimer = roomState.bidTimerSeconds ?? 15;
+  const auctionActive = roomState.auction.phase === "auction" && !auction.isPaused;
+  const canBid = auctionActive && !isSpectator && myTeam && !myTeam.isVacant && currentPlayer && !isMyBid && !bidPending &&
     myTeam.purse >= nextAmount;
 
   const handleBid = useCallback(() => {
-    if (bidPending || isMyBid || !currentPlayer) return;
+    if (bidPending || isMyBid || !currentPlayer || !auctionActive) return;
     setBidPending(true);
     socket.emit("place-bid");
     bidTimeoutRef.current = setTimeout(() => setBidPending(false), 2000);
-  }, [bidPending, isMyBid, currentPlayer, socket]);
+  }, [bidPending, isMyBid, currentPlayer, socket, auctionActive]);
 
-  const timerPct = (timerSeconds / TIMER_INITIAL) * 100;
+  const timerPct = (timerSeconds / lotTimer) * 100;
   const displayPrice = auction.currentBidder ? auction.currentBid : (currentPlayer?.basePriceLakhs ?? 0);
+  const callout = hammerCall(timerSeconds);
+  const bidIncrement = calculateBidIncrement(displayPrice);
+  const bidLabel = isMyBid
+    ? `BID (+${bidIncrement}L)`
+    : bidPending ? "..." : `BID ${formatPrice(nextAmount)}`;
 
   if (!currentPlayer) {
     return (
@@ -70,57 +85,65 @@ export default function AuctionPlayerStrip({
     );
   }
 
-  const prevTeam = currentPlayer.previousTeam && currentPlayer.previousTeam !== "None"
-    ? TEAM_MAP[currentPlayer.previousTeam] : null;
-
   return (
     <div className="shrink-0 ref-card mx-2 mt-1 mb-1 p-0 overflow-hidden">
       <div className="ref-timer-bar mx-0 rounded-none">
         <motion.div className="ref-timer-fill" animate={{ width: `${timerPct}%` }} transition={{ duration: 0.3 }} />
       </div>
 
-      <div className="p-2.5 space-y-1.5">
-        <div className="flex items-center gap-1.5 flex-wrap">
-          <span className="ref-pill ref-pill-blue">{ROLE_LABELS[currentPlayer.role] || currentPlayer.role}</span>
-          {currentPlayer.isOverseas && <span className="ref-pill ref-pill-purple">OS</span>}
-          <span className="text-[10px] text-gray-400">{countryCode(currentPlayer.country)}</span>
-          {prevTeam && (
-            <span className="text-[10px] text-gray-500 ml-auto">{prevTeam.shortName}</span>
-          )}
-          {auction.isPaused && (
-            <span className="ref-pill ref-pill-orange ml-auto border border-orange-500/50">PAUSED</span>
-          )}
+      <div className="p-2.5">
+        <div className="flex items-start gap-2">
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-1.5 flex-wrap mb-1">
+              <span className="ref-pill ref-pill-blue text-[9px]">{ROLE_LABELS[currentPlayer.role] || currentPlayer.role}</span>
+              <span className="text-[10px] text-gray-400 border border-[#2A2A2A] rounded px-1">{countryCode(currentPlayer.country)}</span>
+              {currentPlayer.isOverseas && <span className="ref-pill ref-pill-purple text-[9px]">OS</span>}
+              {auction.isPaused && <span className="ref-pill ref-pill-orange text-[9px]">PAUSED</span>}
+            </div>
+            <h2 className="text-base font-bold text-white truncate">{currentPlayer.name}</h2>
+            <div className="flex items-center gap-2 mt-1">
+              <span className="text-xl font-black text-[#22C55E]">{formatPrice(displayPrice)}</span>
+              {leadingTeam && auction.currentBidder && (
+                <TeamLogo
+                  teamId={auction.currentBidder}
+                  logoUrl={leadingTeam.logoUrl}
+                  shortName={leadingTeam.shortName}
+                  size={28}
+                />
+              )}
+              {isMyBid && <span className="text-[10px] text-green-400 font-bold">YOU</span>}
+            </div>
+          </div>
+
           {!auction.isPaused && (
-            <span className="ml-auto text-lg font-mono font-black tabular-nums text-[#F97316]">{timerSeconds}s</span>
+            <div className="shrink-0 flex flex-col items-center">
+              <div className={`w-14 h-14 rounded-lg flex flex-col items-center justify-center font-black ${
+                timerSeconds <= 3 ? "bg-red-600 text-white" : timerSeconds <= 7 ? "bg-orange-600 text-white" : "bg-red-700/80 text-white"
+              }`}>
+                <span className="text-2xl leading-none tabular-nums">{timerSeconds}</span>
+                <span className="text-[8px] uppercase tracking-wide">sec</span>
+              </div>
+              <AnimatePresence>
+                {callout && (
+                  <motion.span
+                    initial={{ opacity: 0, scale: 0.8 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0 }}
+                    className="text-[10px] font-black text-red-400 mt-0.5"
+                  >
+                    {callout}
+                  </motion.span>
+                )}
+              </AnimatePresence>
+            </div>
           )}
         </div>
 
-        <div className="flex items-center justify-between gap-2">
-          <h2 className="text-base font-bold text-white truncate flex-1">{currentPlayer.name}</h2>
-          <div className="text-right shrink-0">
-            <div className="text-[9px] text-gray-500 uppercase">{auction.currentBidder ? "Current" : "Base"}</div>
-            <div className="text-lg font-black text-white">{formatPrice(displayPrice)}</div>
-          </div>
-        </div>
-
-        {auction.currentBidder && roomState.teams[auction.currentBidder] && (
-          <div className="text-[10px] text-gray-400">
-            Leading: <span className="text-[#FFD700] font-semibold">{roomState.teams[auction.currentBidder].shortName}</span>
-            {isMyBid && <span className="text-green-400 ml-1">(YOU)</span>}
-          </div>
-        )}
-
-        <div className="flex items-center gap-2 pt-0.5">
+        <div className="flex items-center gap-2 pt-2 mt-1 border-t border-[#2A2A2A]/60">
           {myTeam && (
-            <div className="shrink-0 text-[11px] flex gap-2">
-              <span>
-                <span className="text-gray-500">Left: </span>
-                <span className="text-[#22C55E] font-bold">{formatPrice(myTeam.purse)}</span>
-              </span>
-              <span>
-                <span className="text-gray-500">Spent: </span>
-                <span className="text-[#FFD700] font-bold">{formatPrice(TOTAL_PURSE - myTeam.purse)}</span>
-              </span>
+            <div className="shrink-0 text-[10px] flex gap-2">
+              <span><span className="text-gray-500">Left: </span><span className="text-[#22C55E] font-bold">{formatPrice(myTeam.purse)}</span></span>
+              <span><span className="text-gray-500">Spent: </span><span className="text-[#FFD700] font-bold">{formatPrice(TOTAL_PURSE - myTeam.purse)}</span></span>
             </div>
           )}
           {myTeamId && !isSpectator && (
@@ -128,14 +151,12 @@ export default function AuctionPlayerStrip({
               type="button"
               onClick={handleBid}
               disabled={!canBid && !isMyBid}
-              className={`ref-bid-btn ${isMyBid ? "ref-bid-btn-highest" : ""}`}
+              className={`ref-bid-btn ml-auto ${isMyBid ? "ref-bid-btn-highest" : ""}`}
             >
-              {isMyBid ? "HIGHEST" : bidPending ? "..." : `BID ${formatPrice(nextAmount)}`}
+              {bidLabel}
             </button>
           )}
-          <button type="button" onClick={onOpenPool} className="ref-icon-btn shrink-0" aria-label="Upcoming players">
-            ☰
-          </button>
+          <button type="button" onClick={onOpenPool} className="ref-icon-btn shrink-0" aria-label="Upcoming players">☰</button>
         </div>
       </div>
     </div>
@@ -157,11 +178,14 @@ export function StickyBidBar({
   const currentPlayer = auction.currentPlayer;
   const isMyBid = auction.currentBidder === myTeamId;
   const nextAmount = auction.currentBidder ? auction.nextBidAmount : (currentPlayer?.basePriceLakhs ?? 0);
+  const displayPrice = auction.currentBidder ? auction.currentBid : (currentPlayer?.basePriceLakhs ?? 0);
+  const bidIncrement = calculateBidIncrement(displayPrice);
 
-  const canBid = !isSpectator && myTeam && currentPlayer && !isMyBid && !bidPending && !auction.isPaused &&
+  const auctionActive = roomState.auction.phase === "auction" && !auction.isPaused;
+  const canBid = auctionActive && !isSpectator && myTeam && !myTeam.isVacant && currentPlayer && !isMyBid && !bidPending &&
     myTeam.purse >= nextAmount;
 
-  if (!myTeamId || isSpectator || !currentPlayer || auction.isPaused) return null;
+  if (!myTeamId || isSpectator || !currentPlayer || !auctionActive) return null;
 
   function handleBid() {
     if (!canBid && !isMyBid) return;
@@ -177,9 +201,17 @@ export function StickyBidBar({
         type="button"
         onClick={handleBid}
         disabled={!canBid && !isMyBid}
-        className={`w-full py-3 rounded-xl font-black text-sm ${isMyBid ? "bg-green-700 text-white" : "bid-btn text-black"}`}
+        className={`w-full py-3 rounded-xl font-black text-sm ${
+          isMyBid
+            ? "ref-bid-btn-highest border border-[#FFD700]/50"
+            : "ref-bid-btn"
+        }`}
       >
-        {isMyBid ? "YOU ARE HIGHEST BIDDER" : bidPending ? "RAISING..." : `RAISE TO ${formatPrice(nextAmount)}`}
+        {isMyBid
+          ? `BID (+${bidIncrement}L)`
+          : bidPending
+            ? "RAISING..."
+            : `BID ${formatPrice(nextAmount)}`}
       </button>
     </div>
   );

@@ -27,7 +27,7 @@ const MODES: {
   {
     id: "mega",
     title: "Mega Auction",
-    subtitle: "Full player pool · 6 RTM cards · ₹120 Cr purse",
+    subtitle: "Full player pool · Up to 6 RTM (6 − retentions) · ₹120 Cr purse",
     icon: "🏟️",
     accent: "from-amber-500/20 to-orange-600/10",
   },

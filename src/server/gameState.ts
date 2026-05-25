@@ -7,7 +7,7 @@ import {
 } from "../lib/types";
 
 import {
-  TOTAL_PURSE, formatPrice,
+  TOTAL_PURSE, formatPrice, MAX_FRANCHISES,
   MAX_RETENTIONS, MAX_OVERSEAS, TIMER_INITIAL, ROUND2_DISCOUNT,
   calculateRetentionCost, validateRetentions, validateFlexRetentions,
   calculateFlexRetentionCost, getInitialRtmCards, normalizePriceLakhs,
@@ -185,6 +185,8 @@ export interface Room {
 
   minTeamsToStart: number;
 
+  bidTimerSeconds: number;
+
   createdAt: number;
 
   /** IPL set-ordered pool with per-set shuffle (server-only) */
@@ -260,7 +262,9 @@ export function createRoom(roomId: string, mode: AuctionMode, hostSocketId: stri
 
     retentionTimeLeft: 180,
 
-    minTeamsToStart: 2,
+    minTeamsToStart: MAX_FRANCHISES,
+
+    bidTimerSeconds: TIMER_INITIAL,
 
     createdAt: Date.now(),
 
@@ -333,6 +337,14 @@ function createEmptyAuctionState(): AuctionState {
     rtmTimerSeconds: 0,
 
     rtmPrice: 0,
+
+    rtmPhase: "none",
+
+    rtmWinningBidder: null,
+
+    rtmEscalatedPrice: 0,
+
+    rtmRaiseUsed: false,
 
     bidHistory: [],
 
@@ -503,6 +515,8 @@ export function addTeam(
 
     isOnline: true,
 
+    isVacant: false,
+
   };
 
   room.teams.set(teamId, team);
@@ -601,6 +615,71 @@ export function allReady(room: Room): boolean {
 
 
 
+export function allTeamsJoined(room: Room): boolean {
+  const active = [...room.teams.values()].filter((t) => !t.isVacant).length;
+  return active >= MAX_FRANCHISES;
+}
+
+export function canStartAuction(room: Room, byHost: boolean): { ok: boolean; reason?: string } {
+  if (room.auction.phase !== "lobby") return { ok: false, reason: "Auction already started" };
+  const teamCount = [...room.teams.values()].filter((t) => !t.isVacant).length;
+  if (teamCount < 2) return { ok: false, reason: "Need at least 2 teams to start" };
+  if (!byHost && !allTeamsJoined(room)) {
+    return { ok: false, reason: `Waiting for all ${MAX_FRANCHISES} teams (${teamCount}/${MAX_FRANCHISES} joined)` };
+  }
+  return { ok: true };
+}
+
+export function claimVacantTeam(
+  room: Room, teamId: string, socketId: string, playerName: string,
+): boolean {
+  const team = room.teams.get(teamId);
+  if (!team?.isVacant) return false;
+  if (room.connectedPlayers.has(socketId)) return false;
+
+  team.isVacant = false;
+  team.ownerId = socketId;
+  team.ownerName = playerName;
+  team.isOnline = true;
+  room.connectedPlayers.set(socketId, teamId);
+  room.spectators.delete(socketId);
+
+  const token = room.sessionTokens.get(socketId);
+  if (token) {
+    room.tokenToSocket.set(token, { socketId, teamId, isSpectator: false });
+  }
+  return true;
+}
+
+export function kickTeamOwner(room: Room, teamId: string): { ownerName: string; socketId?: string } | null {
+  const team = room.teams.get(teamId);
+  if (!team || team.isVacant) return null;
+
+  const ownerName = team.ownerName;
+  let ownerSocketId: string | undefined;
+  for (const [sid, tid] of room.connectedPlayers) {
+    if (tid === teamId) {
+      ownerSocketId = sid;
+      break;
+    }
+  }
+
+  team.isVacant = true;
+  team.isOnline = false;
+  team.ownerId = "";
+
+  if (ownerSocketId) {
+    room.connectedPlayers.delete(ownerSocketId);
+    room.spectators.add(ownerSocketId);
+    const token = room.sessionTokens.get(ownerSocketId);
+    if (token) {
+      room.tokenToSocket.set(token, { socketId: ownerSocketId, isSpectator: true });
+    }
+  }
+
+  return { ownerName, socketId: ownerSocketId };
+}
+
 export function reconnectByToken(
 
   room: Room, token: string, newSocketId: string
@@ -631,8 +710,12 @@ export function reconnectByToken(
   }
 
   if (entry.teamId) {
-    room.connectedPlayers.set(newSocketId, entry.teamId);
     const team = room.teams.get(entry.teamId);
+    if (team?.isVacant) {
+      room.spectators.add(newSocketId);
+      return { isSpectator: true, playerName: name };
+    }
+    room.connectedPlayers.set(newSocketId, entry.teamId);
     if (team) {
       team.ownerId = newSocketId;
       team.isOnline = true;
@@ -835,6 +918,8 @@ export function resetRoomForRematch(room: Room): void {
 
     team.rtmCards = 0;
 
+    team.rtmAcquisitions = [];
+
     team.purse = TOTAL_PURSE;
 
     team.isReady = team.isBot ?? false;
@@ -899,6 +984,8 @@ export function serializeRoom(room: Room, io?: { sockets: { sockets: Map<string,
 
     minTeamsToStart: room.minTeamsToStart,
 
+    bidTimerSeconds: room.bidTimerSeconds,
+
     upcomingPreviewBySet: previewBySet(room.poolMeta),
 
     upcomingPreview: previewBySet(room.poolMeta).flatMap((g) => g.players).slice(0, 30),
@@ -948,8 +1035,9 @@ export function importRoomFromSnapshot(raw: Record<string, unknown>): Room | nul
       retentionTimerInterval: null,
       cleanupTimer: null,
       retentionTimeLeft: Number(raw.retentionTimeLeft) || 0,
-      minTeamsToStart: Number(raw.minTeamsToStart) || 2,
+      minTeamsToStart: Number(raw.minTeamsToStart) || MAX_FRANCHISES,
       createdAt: Number(raw.createdAt) || Date.now(),
+      bidTimerSeconds: Number(raw.bidTimerSeconds) || TIMER_INITIAL,
       poolMeta: (raw.poolMeta as PoolMeta) || null,
     };
 

@@ -36,7 +36,7 @@ export function getSetDisplayLabel(setName: string): string {
 export function getSetShortLabel(setName: string): string {
   const full = setToCategory.get(setName);
   if (!full) return setName;
-  if (full === "Marquee Players") return "Marquee · Top 35";
+  if (full === "Marquee Players") return setName.startsWith("M2") ? "Marquee · Set 2" : setName.startsWith("M1") ? "Marquee · Set 1" : "Marquee";
   if (full === "Wicket-Keepers") return "Wicketkeepers";
   if (full === "Spin Bowlers") return "Spinners";
   if (full === "Fast Bowlers") return "Fast Bowlers";

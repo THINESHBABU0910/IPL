@@ -2,7 +2,7 @@
 
 import { RoomState } from "@/lib/types";
 import { Socket } from "socket.io-client";
-import { TOTAL_PURSE, TIMER_INITIAL, TIMER_BID_RESET, formatPrice } from "@/lib/constants";
+import { TOTAL_PURSE, TIMER_BID_RESET, formatPrice } from "@/lib/constants";
 import AdminPanel from "./AdminPanel";
 
 const MODE_LABELS: Record<string, string> = {
@@ -23,8 +23,13 @@ interface RoomSettingsTabProps {
 export default function RoomSettingsTab({
   roomState, socket, isHost, roomId, soundOn, onToggleSound,
 }: RoomSettingsTabProps) {
-  const timerOptions = [5, 10, 15, 20, 25];
-  const activeTimer = TIMER_INITIAL;
+  const timerOptions = [5, 10, 15, 20, 25, 30];
+  const activeTimer = roomState.bidTimerSeconds ?? 15;
+
+  function setTimer(seconds: number) {
+    if (!isHost) return;
+    socket.emit("host-action", { action: "set-timer", timerSeconds: seconds });
+  }
 
   return (
     <div className="scroll-panel px-2 pb-2 space-y-3">
@@ -38,17 +43,22 @@ export default function RoomSettingsTab({
           </div>
           <span className="text-sm font-bold text-[#A855F7]">{activeTimer}s</span>
         </div>
-        <p className="text-[10px] text-gray-500">Time allowed for each bid round · resets to {TIMER_BID_RESET}s after bid</p>
-        <div className="flex gap-1.5">
+        <p className="text-[10px] text-gray-500">
+          Seconds per lot · +{TIMER_BID_RESET}s after each bid{isHost ? " · Host can change anytime" : ""}
+        </p>
+        <div className="flex gap-1.5 flex-wrap">
           {timerOptions.map((t) => (
-            <div
+            <button
               key={t}
-              className={`flex-1 py-1.5 rounded-lg text-center text-xs font-bold ${
+              type="button"
+              disabled={!isHost}
+              onClick={() => setTimer(t)}
+              className={`flex-1 min-w-[2.5rem] py-1.5 rounded-lg text-center text-xs font-bold ${
                 t === activeTimer ? "bg-[#A855F7]/30 text-[#A855F7] border border-[#A855F7]/50" : "bg-[#0A0A0A] text-gray-500 border border-[#2A2A2A]"
-              }`}
+              } ${!isHost ? "opacity-60 cursor-default" : "hover:border-[#A855F7]/40"}`}
             >
               {t}s
-            </div>
+            </button>
           ))}
         </div>
       </div>

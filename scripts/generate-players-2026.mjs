@@ -68,7 +68,7 @@ function setCategory(set, specialism, bowlingStyle) {
   if (set.startsWith("UWK")) return "Uncapped";
   if (set.startsWith("UFA")) return "Uncapped";
   if (set.startsWith("USP")) return "Uncapped";
-  if (set === "BA1") return "Marquee Players";
+  if (set.startsWith("M") || set === "BA1") return "Marquee Players";
   if (set.startsWith("BA")) return "Batters";
   if (set.startsWith("AL")) return "All-Rounders";
   if (set.startsWith("WK")) return "Wicket-Keepers";

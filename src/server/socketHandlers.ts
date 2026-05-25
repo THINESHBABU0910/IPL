@@ -8,11 +8,13 @@ import {
   serializeRoom, isHost, addActivity, addChat,
   generateSessionToken, resetRoomForRematch, reconnectByToken,
   pushAuctionActivity, normalizeRetentionPlayerIds,
+  allTeamsJoined, canStartAuction, claimVacantTeam, kickTeamOwner,
 } from "./gameState";
 import type { Room } from "./gameState";
 import {
   presentNextPlayer, processBid, sellPlayer, markUnsold,
-  checkRTM, executeRTM, getRemainingCount,
+  checkRTM, startRtmEscalation, processRtmRaise, beginRtmMatchPhase,
+  completeRtmMatch, passRtmMatch, clearRtmAuctionState, getRemainingCount,
 } from "./auctionEngine";
 import { isValidPlayerName, normalizePlayerName } from "../lib/validateName";
 import { getInitialRtmCards, isRetentionMode } from "../lib/iplRules";
@@ -80,6 +82,22 @@ function broadcastState(io: IOServer, room: Room): void {
   io.to(room.id).emit("room-state", serializeRoom(room, io));
   io.to(room.id).emit("room-runtime-state", buildRuntimeState(room));
   saveRoomSnapshot(room);
+}
+
+function tryStartGame(io: IOServer, room: Room, byHost: boolean, socket?: IOSocket): boolean {
+  const check = canStartAuction(room, byHost);
+  if (!check.ok) {
+    socket?.emit("error", { message: check.reason || "Cannot start yet" });
+    return false;
+  }
+  if (isRetentionMode(room.mode)) startRetentionPhase(io, room);
+  else startAuction(io, room);
+  return true;
+}
+
+function maybeAutoStart(io: IOServer, room: Room): void {
+  if (room.auction.phase !== "lobby") return;
+  if (allTeamsJoined(room)) tryStartGame(io, room, false);
 }
 
 function resolveRoom(roomId: string): Room | undefined {
@@ -295,6 +313,22 @@ export function registerHandlers(io: IOServer): void {
 
       const playerName = room.playerNames.get(socket.id) || "Player";
       const existingTeamId = room.connectedPlayers.get(socket.id);
+      const vacantTeam = room.teams.get(data.teamId);
+
+      if (vacantTeam?.isVacant && !existingTeamId) {
+        if (claimVacantTeam(room, data.teamId, socket.id, playerName)) {
+          const token = room.sessionTokens.get(socket.id)!;
+          addActivity(room, "system", `${playerName} took over ${vacantTeam.shortName} (squad & purse kept)`);
+          io.to(currentRoomId).emit("team-picked", {
+            teamId: data.teamId, playerName, socketId: socket.id, sessionToken: token,
+          });
+          broadcastState(io, room);
+          callback?.({ success: true, sessionToken: token });
+        } else {
+          callback?.({ success: false });
+        }
+        return;
+      }
 
       // After start: claim a free team only (no switching)
       if (phase === "auction" || phase === "retention") {
@@ -335,6 +369,7 @@ export function registerHandlers(io: IOServer): void {
         });
         broadcastState(io, room);
         callback?.({ success: true, sessionToken: token });
+        maybeAutoStart(io, room);
       } else {
         callback?.({ success: false });
       }
@@ -345,9 +380,7 @@ export function registerHandlers(io: IOServer): void {
       const room = getRoom(currentRoomId);
       if (!room || room.auction.phase !== "lobby") return;
       if (!isJoined(room, socket.id)) return;
-
-      if (isRetentionMode(room.mode)) startRetentionPhase(io, room);
-      else startAuction(io, room);
+      tryStartGame(io, room, isHost(room, socket.id), socket);
     });
 
     socket.on("lock-retentions", (data) => {
@@ -385,6 +418,12 @@ export function registerHandlers(io: IOServer): void {
         if (result.success) {
           const team = room.teams.get(teamId)!;
           const entry = addActivity(room, "bid", `${team.shortName} bid ${room.auction.currentBid}L on ${room.auction.currentPlayer?.name}`);
+          emitAuctionActivity(io, room, {
+            type: "BID_PLACED",
+            teamId,
+            playerName: room.auction.currentPlayer?.name,
+            price: room.auction.currentBid,
+          });
           io.to(currentRoomId!).emit("bid-update", {
             currentBid: room.auction.currentBid,
             currentBidder: teamId,
@@ -405,24 +444,17 @@ export function registerHandlers(io: IOServer): void {
       if (!currentRoomId) return;
       const room = getRoom(currentRoomId);
       if (!room || !room.auction.isRTM || !room.auction.currentPlayer) return;
+      if (room.auction.rtmPhase !== "offer") return;
       const teamId = getTeamIdForSocket(room, socket.id);
       if (!teamId || teamId !== room.auction.rtmTeamId) return;
 
-      if (room.rtmTimerInterval) { clearInterval(room.rtmTimerInterval); room.rtmTimerInterval = null; }
-
       const player = room.auction.currentPlayer;
-      const price = room.auction.rtmPrice || room.auction.currentBid;
+      const escal = startRtmEscalation(room);
+      if (!escal) return;
 
-      if (executeRTM(room, teamId, price)) {
-        room.auction.isRTM = false;
-        room.auction.rtmTeamId = null;
-        room.auction.isPaused = false;
-        room.auction.currentPlayer = null;
-        io.to(currentRoomId).emit("rtm-used", { player, teamId, price });
-        addActivity(room, "rtm", `${room.teams.get(teamId)?.shortName} used RTM for ${player.name} at ${price}L`);
-        broadcastState(io, room);
-        setTimeout(() => advanceAuction(io, room), 3000);
-      }
+      clearRtmTimer(room);
+      addActivity(room, "rtm", `${room.teams.get(teamId)?.shortName} invoked RTM — ${room.teams.get(escal.winningBidder)?.shortName} gets final raise`);
+      beginRtmEscalatePhase(io, room, player);
     });
 
     socket.on("decline-rtm", () => {
@@ -432,17 +464,70 @@ export function registerHandlers(io: IOServer): void {
       const teamId = getTeamIdForSocket(room, socket.id);
       if (!teamId || teamId !== room.auction.rtmTeamId) return;
 
-      if (room.rtmTimerInterval) { clearInterval(room.rtmTimerInterval); room.rtmTimerInterval = null; }
+      const player = room.auction.currentPlayer;
+      clearRtmTimer(room);
+
+      if (room.auction.rtmPhase === "match") {
+        handleRtmPass(io, room, player);
+      } else {
+        handleRtmOfferDeclined(io, room, player);
+      }
+    });
+
+    socket.on("rtm-raise", () => {
+      if (!currentRoomId) return;
+      const room = getRoom(currentRoomId);
+      if (!room || room.auction.rtmPhase !== "escalate" || !room.auction.currentPlayer) return;
+      const teamId = getTeamIdForSocket(room, socket.id);
+      if (!teamId || teamId !== room.auction.rtmWinningBidder) return;
 
       const player = room.auction.currentPlayer;
-      room.auction.isRTM = false;
-      room.auction.rtmTeamId = null;
-      room.auction.isPaused = false;
-      room.auction.currentPlayer = null;
+      const result = processRtmRaise(room);
+      if (!result.success) {
+        socket.emit("bid-rejected", { reason: result.reason || "Cannot raise" });
+        return;
+      }
 
-      io.to(currentRoomId).emit("rtm-declined", { player });
+      clearRtmTimer(room);
+      addActivity(room, "rtm", `${room.teams.get(teamId)?.shortName} raised to ${result.newPrice}L — RTM team must match`);
+      beginRtmMatchPhaseUI(io, room, player);
+    });
+
+    socket.on("rtm-skip-raise", () => {
+      if (!currentRoomId) return;
+      const room = getRoom(currentRoomId);
+      if (!room || room.auction.rtmPhase !== "escalate" || !room.auction.currentPlayer) return;
+      const teamId = getTeamIdForSocket(room, socket.id);
+      if (!teamId || teamId !== room.auction.rtmWinningBidder) return;
+
+      const player = room.auction.currentPlayer;
+      clearRtmTimer(room);
+      addActivity(room, "rtm", `${room.teams.get(teamId)?.shortName} passed on final raise`);
+      beginRtmMatchPhaseUI(io, room, player);
+    });
+
+    socket.on("rtm-match", () => {
+      if (!currentRoomId) return;
+      const room = getRoom(currentRoomId);
+      if (!room || room.auction.rtmPhase !== "match" || !room.auction.currentPlayer) return;
+      const teamId = getTeamIdForSocket(room, socket.id);
+      if (!teamId || teamId !== room.auction.rtmTeamId) return;
+
+      const player = room.auction.currentPlayer;
+      clearRtmTimer(room);
+      const result = completeRtmMatch(room, teamId);
+      if (!result.success) {
+        socket.emit("bid-rejected", { reason: result.reason || "Cannot match" });
+        beginRtmMatchPhaseUI(io, room, player);
+        return;
+      }
+
+      const price = result.price || room.auction.rtmEscalatedPrice || 0;
+      clearRtmAuctionState(room);
+      io.to(currentRoomId).emit("rtm-used", { player, teamId, price });
+      addActivity(room, "rtm", `${room.teams.get(teamId)?.shortName} matched RTM for ${player.name} at ${price}L`);
       broadcastState(io, room);
-      setTimeout(() => advanceAuction(io, room), 2000);
+      setTimeout(() => advanceAuction(io, room), 3000);
     });
 
     socket.on("send-chat", (data) => {
@@ -464,8 +549,26 @@ export function registerHandlers(io: IOServer): void {
       switch (data.action) {
         case "add-time":
           if (room.auction.phase === "auction" && !room.auction.isPaused) {
-            room.auction.timerSeconds = Math.min(room.auction.timerSeconds + 10, 30);
+            room.auction.timerSeconds = Math.min(room.auction.timerSeconds + 5, 90);
             io.to(room.id).emit("timer-tick", { seconds: room.auction.timerSeconds, type: "auction" });
+            addActivity(room, "system", `Host +5s on timer (${room.auction.timerSeconds}s)`);
+          }
+          break;
+        case "remove-time":
+          if (room.auction.phase === "auction" && !room.auction.isPaused) {
+            room.auction.timerSeconds = Math.max(1, room.auction.timerSeconds - 5);
+            io.to(room.id).emit("timer-tick", { seconds: room.auction.timerSeconds, type: "auction" });
+            addActivity(room, "system", `Host -5s on timer (${room.auction.timerSeconds}s)`);
+          }
+          break;
+        case "set-timer":
+          if (typeof data.timerSeconds === "number") {
+            room.bidTimerSeconds = Math.max(5, Math.min(60, data.timerSeconds));
+            if (room.auction.phase === "auction" && room.auction.currentPlayer && !room.auction.isPaused) {
+              room.auction.timerSeconds = Math.min(room.auction.timerSeconds, room.bidTimerSeconds);
+              io.to(room.id).emit("timer-tick", { seconds: room.auction.timerSeconds, type: "auction" });
+            }
+            addActivity(room, "system", `Host set bid timer to ${room.bidTimerSeconds}s per lot`);
           }
           break;
         case "pause":
@@ -497,11 +600,23 @@ export function registerHandlers(io: IOServer): void {
           break;
         case "kick":
           if (data.targetTeamId) {
-            for (const [sid, tid] of room.connectedPlayers) {
-              if (tid === data.targetTeamId) {
-                io.sockets.sockets.get(sid)?.emit("error", { message: "You were removed by the host" });
-                io.sockets.sockets.get(sid)?.disconnect(true);
-                break;
+            const kicked = kickTeamOwner(room, data.targetTeamId);
+            if (kicked) {
+              const team = room.teams.get(data.targetTeamId)!;
+              addActivity(room, "system", `Host removed ${kicked.ownerName} from ${team.shortName} — open for takeover`);
+              io.to(room.id).emit("team-vacated", {
+                teamId: data.targetTeamId,
+                previousOwner: kicked.ownerName,
+                message: `${team.shortName} is open — squad & purse kept. Tap team to take over.`,
+              });
+              if (kicked.socketId) {
+                const sock = io.sockets.sockets.get(kicked.socketId);
+                sock?.emit("error", { message: `You were removed from ${team.shortName}. You can take over another vacant team or spectate.` });
+                sock?.emit("session-restored", {
+                  teamId: undefined,
+                  sessionToken: room.sessionTokens.get(kicked.socketId) || "",
+                  isSpectator: true,
+                });
               }
             }
           }
@@ -515,8 +630,7 @@ export function registerHandlers(io: IOServer): void {
           break;
         case "start-now":
           if (room.auction.phase === "lobby") {
-            if (isRetentionMode(room.mode)) startRetentionPhase(io, room);
-            else startAuction(io, room);
+            tryStartGame(io, room, true, socket);
           }
           break;
         case "rematch":
@@ -671,38 +785,98 @@ function advanceAuction(io: IOServer, room: Room): void {
   addActivity(room, "system", `Up for auction: ${player.name} (${player.set})`);
   broadcastState(io, room);
 
-  room.auction.timerSeconds = TIMER_INITIAL;
+  room.auction.timerSeconds = room.bidTimerSeconds;
   syncAuctionTimerEndsAt(room);
   room.timerInterval = setInterval(() => tickAuction(io, room), 1000);
+}
+
+function clearRtmTimer(room: Room): void {
+  if (room.rtmTimerInterval) {
+    clearInterval(room.rtmTimerInterval);
+    room.rtmTimerInterval = null;
+  }
+}
+
+function rtmEmitPhase(phase: Room["auction"]["rtmPhase"]): "offer" | "escalate" | "match" {
+  if (phase === "escalate" || phase === "match") return phase;
+  return "offer";
+}
+
+function emitRtmOpportunity(io: IOServer, room: Room, player: import("../lib/types").Player): void {
+  const { auction } = room;
+  io.to(room.id).emit("rtm-opportunity", {
+    player,
+    teamId: auction.rtmTeamId!,
+    price: auction.rtmEscalatedPrice || auction.rtmPrice || 0,
+    seconds: auction.rtmTimerSeconds,
+    phase: rtmEmitPhase(auction.rtmPhase),
+    winningBidder: auction.rtmWinningBidder || undefined,
+    escalatedPrice: auction.rtmEscalatedPrice || undefined,
+    raiseUsed: auction.rtmRaiseUsed,
+  });
+}
+
+function startRtmCountdown(io: IOServer, room: Room, player: import("../lib/types").Player, onExpire: () => void): void {
+  clearRtmTimer(room);
+  room.auction.rtmTimerSeconds = RTM_TIMER;
+  emitRtmOpportunity(io, room, player);
+  room.rtmTimerInterval = setInterval(() => {
+    room.auction.rtmTimerSeconds--;
+    io.to(room.id).emit("rtm-tick", { seconds: room.auction.rtmTimerSeconds });
+    if (room.auction.rtmTimerSeconds <= 0) {
+      clearRtmTimer(room);
+      onExpire();
+    }
+  }, 1000);
+}
+
+function handleRtmOfferDeclined(io: IOServer, room: Room, player: import("../lib/types").Player): void {
+  addActivity(room, "rtm", `${room.teams.get(room.auction.rtmTeamId!)?.shortName} declined RTM — sale stands`);
+  clearRtmAuctionState(room);
+  io.to(room.id).emit("rtm-declined", { player });
+  broadcastState(io, room);
+  setTimeout(() => advanceAuction(io, room), 2000);
+}
+
+function handleRtmPass(io: IOServer, room: Room, player: import("../lib/types").Player): void {
+  const pass = passRtmMatch(room);
+  const buyer = pass ? room.teams.get(pass.winningBidder)?.shortName : "buyer";
+  addActivity(room, "rtm", `${room.teams.get(room.auction.rtmTeamId!)?.shortName} passed on match — ${buyer} keeps player (RTM card restored)`);
+  clearRtmAuctionState(room);
+  io.to(room.id).emit("rtm-declined", { player });
+  broadcastState(io, room);
+  setTimeout(() => advanceAuction(io, room), 2000);
+}
+
+function beginRtmEscalatePhase(io: IOServer, room: Room, player: import("../lib/types").Player): void {
+  startRtmCountdown(io, room, player, () => {
+    beginRtmMatchPhase(room);
+    addActivity(room, "rtm", "Raise window expired — RTM team must match current price");
+    beginRtmMatchPhaseUI(io, room, player);
+  });
+}
+
+function beginRtmMatchPhaseUI(io: IOServer, room: Room, player: import("../lib/types").Player): void {
+  beginRtmMatchPhase(room);
+  const price = room.auction.rtmEscalatedPrice || room.auction.rtmPrice || 0;
+  addActivity(room, "rtm", `${room.teams.get(room.auction.rtmTeamId!)?.shortName} must match ${price}L or pass`);
+  startRtmCountdown(io, room, player, () => handleRtmPass(io, room, player));
 }
 
 function startRTMPhase(io: IOServer, room: Room, player: import("../lib/types").Player, rtmTeamId: string, price: number): void {
   room.auction.isRTM = true;
   room.auction.rtmTeamId = rtmTeamId;
-  room.auction.rtmTimerSeconds = RTM_TIMER;
   room.auction.rtmPrice = price;
+  room.auction.rtmPhase = "offer";
+  room.auction.rtmWinningBidder = null;
+  room.auction.rtmEscalatedPrice = price;
+  room.auction.rtmRaiseUsed = false;
   room.auction.currentBid = price;
   room.auction.isPaused = true;
   room.auction.currentPlayer = player;
 
   if (room.timerInterval) { clearInterval(room.timerInterval); room.timerInterval = null; }
 
-  io.to(room.id).emit("rtm-opportunity", { player, teamId: rtmTeamId, price, seconds: RTM_TIMER });
   addActivity(room, "rtm", `${room.teams.get(rtmTeamId)?.shortName} can RTM ${player.name} at ${price}L`);
-
-  room.rtmTimerInterval = setInterval(() => {
-    room.auction.rtmTimerSeconds--;
-    io.to(room.id).emit("rtm-tick", { seconds: room.auction.rtmTimerSeconds });
-    if (room.auction.rtmTimerSeconds <= 0) {
-      clearInterval(room.rtmTimerInterval!);
-      room.rtmTimerInterval = null;
-      room.auction.isRTM = false;
-      room.auction.rtmTeamId = null;
-      room.auction.isPaused = false;
-      room.auction.currentPlayer = null;
-      io.to(room.id).emit("rtm-declined", { player });
-      broadcastState(io, room);
-      setTimeout(() => advanceAuction(io, room), 2000);
-    }
-  }, 1000);
+  startRtmCountdown(io, room, player, () => handleRtmOfferDeclined(io, room, player));
 }

@@ -3,6 +3,7 @@
  * Sources: IPLT20 GC announcement, BCCI auction handbook
  */
 
+export const MAX_FRANCHISES = 10;
 export const TOTAL_PURSE = 12000; // ₹120 Cr in lakhs
 export const MAX_SQUAD_SIZE = 25;
 export const MIN_SQUAD_SIZE = 18;
@@ -73,6 +74,30 @@ export function isRetentionMode(mode: string): boolean {
 
 export function isRtmAllowed(mode: string): boolean {
   return mode === "mega" || isRetentionMode(mode);
+}
+
+export function validateRtmCapLimits(
+  team: { retainedPlayers: { isCapped: boolean; country: string }[]; rtmAcquisitions?: { isCapped: boolean; country: string }[] },
+  player: { isCapped: boolean; country: string },
+): string | null {
+  const rtmAcq = team.rtmAcquisitions || [];
+  const retained = team.retainedPlayers;
+  const cappedTotal = retained.filter((p) => p.isCapped).length + rtmAcq.filter((p) => p.isCapped).length;
+  const uncappedIndianTotal =
+    retained.filter((p) => !p.isCapped && p.country === "India").length
+    + rtmAcq.filter((p) => !p.isCapped && p.country === "India").length;
+
+  if (player.isCapped && cappedTotal + 1 > MAX_CAPPED_RETENTIONS) {
+    return `Max ${MAX_CAPPED_RETENTIONS} capped players (retentions + RTM combined)`;
+  }
+  if (!player.isCapped && player.country === "India" && uncappedIndianTotal + 1 > MAX_UNCAPPED_RETENTIONS) {
+    return `Max ${MAX_UNCAPPED_RETENTIONS} uncapped Indian players (retentions + RTM combined)`;
+  }
+  return null;
+}
+
+export function getCombinedRtmQuotaRemaining(retainedCount: number, rtmCards: number): number {
+  return rtmCards;
 }
 
 export function getInitialRtmCards(mode: string, retainedCount: number): number {
@@ -196,7 +221,8 @@ export function sortSetKey(setStr: string): number {
 export const IPL_RULES_SUMMARY = {
   purse: "₹120 Cr per franchise (mega auction cycle)",
   squad: "18–25 players, max 8 overseas",
-  retentions: "Up to 6 via pre-auction retention + RTM (max 5 capped + 2 uncapped)",
+  retentions: "Up to 6 combined (retentions + RTM). Max 5 capped + 2 uncapped Indian across both",
+  rtmProcess: "RTM triggers escalation: winning bidder raises once, then original team must match or pass (card restored if pass)",
   retentionSlabs: "Capped: ₹18/14/11/18/14 Cr by slot · Uncapped: ₹4 Cr each",
   flexRetention: "Pick any players · Custom prices · Max 4 capped + 2 uncapped · Deducted from ₹120 Cr",
   bidIncrements: "₹5L (≤1Cr) · ₹10L (1–2Cr) · ₹20L (2–5Cr) · ₹25L (5Cr+)",

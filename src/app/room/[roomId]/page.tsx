@@ -17,10 +17,14 @@ import ParticipantsTab from "@/components/ParticipantsTab";
 import RoomSettingsTab from "@/components/RoomSettingsTab";
 import AuctionOverlays from "@/components/AuctionOverlays";
 import UpcomingPlayersModal from "@/components/UpcomingPlayersModal";
-import LobbyTeamGrid from "@/components/LobbyTeamGrid";
+import SpectatorBar from "@/components/SpectatorBar";
+import BidToastStack, { useBidToasts } from "@/components/BidToastStack";
+import { fireSoldConfetti } from "@/lib/confetti";
+import { AuctionActivity } from "@/lib/auctionActivity";
 import { Toaster, toast } from "sonner";
 import { saveSession, getSessionForRoom } from "@/lib/session";
 import { saveRoomArchive, getRoomArchive, isCompletedArchive, saveRoomProgress } from "@/lib/roomArchive";
+import { MAX_FRANCHISES } from "@/lib/constants";
 import { isValidPlayerName, normalizePlayerName } from "@/lib/validateName";
 import {
   playBidSound, playSoldSound, playUnsoldSound, playRTMSound, playTimerWarning, playTimerFinalBeep, isSoundEnabled, setSoundEnabled,
@@ -67,7 +71,10 @@ export default function RoomPage() {
 
   const [soldInfo, setSoldInfo] = useState<{ player: Player; teamId: string; price: number } | null>(null);
   const [unsoldPlayer, setUnsoldPlayer] = useState<Player | null>(null);
-  const [rtmInfo, setRtmInfo] = useState<{ player: Player; teamId: string; price: number; seconds: number } | null>(null);
+  const [rtmInfo, setRtmInfo] = useState<import("@/components/AuctionOverlays").RtmOverlayInfo | null>(null);
+  const { toasts: bidToasts, pushActivity: pushBidToast, dismiss: dismissBidToast } = useBidToasts();
+  const pushBidToastRef = useRef(pushBidToast);
+  pushBidToastRef.current = pushBidToast;
 
   const isHost = roomState?.hostSocketId === socketRef.current.id;
 
@@ -189,6 +196,13 @@ export default function RoomPage() {
         updateRecentRoomTeam(roomId, teamId, "");
       }
     });
+    socket.on("team-vacated", ({ teamId, message }) => {
+      if (myTeamIdRef.current === teamId) {
+        setMyTeamId(null);
+        myTeamIdRef.current = null;
+      }
+      toast.message(message, { duration: 5000 });
+    });
     socket.on("bid-update", (data) => {
       setRoomState((prev) => prev ? {
         ...prev,
@@ -199,10 +213,16 @@ export default function RoomPage() {
     });
     socket.on("bid-rejected", ({ reason }) => toast.error(reason));
     socket.on("error", ({ message }) => toast.error(message));
-    socket.on("player-sold", (data) => { setSoldInfo(data); playSoldSound(); setTimeout(() => setSoldInfo(null), 2500); });
+    socket.on("player-sold", (data) => {
+      setSoldInfo(data);
+      playSoldSound();
+      fireSoldConfetti();
+      setTimeout(() => setSoldInfo(null), 2500);
+    });
     socket.on("player-unsold", ({ player }) => { setUnsoldPlayer(player); playUnsoldSound(); setTimeout(() => setUnsoldPlayer(null), 2000); });
-    socket.on("rtm-opportunity", (data) => { setRtmInfo(data); playRTMSound(); });
+    socket.on("activity", (entry: AuctionActivity) => { pushBidToastRef.current(entry); });
     socket.on("rtm-tick", ({ seconds }) => setRtmInfo((p) => p ? { ...p, seconds } : null));
+    socket.on("rtm-opportunity", (data) => { setRtmInfo(data); if (data.phase === "offer") playRTMSound(); });
     socket.on("rtm-used", (data) => { setRtmInfo(null); playSoldSound(); });
     socket.on("rtm-declined", () => setRtmInfo(null));
     socket.on("timer-tick", ({ seconds, type }) => {
@@ -225,11 +245,13 @@ export default function RoomPage() {
       socket.off("chat-message", appendChat);
       socket.off("session-restored");
       socket.off("team-picked");
+      socket.off("team-vacated");
       socket.off("bid-update");
       socket.off("bid-rejected");
       socket.off("error");
       socket.off("player-sold");
       socket.off("player-unsold");
+      socket.off("activity");
       socket.off("rtm-opportunity");
       socket.off("rtm-tick");
       socket.off("rtm-used");
@@ -298,6 +320,9 @@ export default function RoomPage() {
 
   const phase = roomState.auction.phase;
   const participantCount = roomState.participants.length || Object.keys(roomState.teams).length;
+  const joinedTeams = Object.values(roomState.teams).filter((t) => !t.isVacant).length;
+  const allTeamsIn = joinedTeams >= MAX_FRANCHISES;
+  const canHeaderStart = phase === "lobby" && (allTeamsIn || isHost) && joinedTeams >= 2;
   const mySquadSize = myTeamId && roomState.teams[myTeamId]
     ? roomState.teams[myTeamId].squad.length + roomState.teams[myTeamId].retainedPlayers.length
     : 0;
@@ -360,7 +385,7 @@ export default function RoomPage() {
           <button type="button" onClick={toggleSound} className="ref-icon-btn text-[#FFD700] text-xs">
             {soundOn ? "🔊" : "🔇"}
           </button>
-          {phase === "lobby" && (
+          {phase === "lobby" && canHeaderStart && (
             <button type="button" onClick={() => socketRef.current.emit("start-game")} className="ref-start-btn">
               ▶ Start
             </button>
@@ -371,17 +396,7 @@ export default function RoomPage() {
       <main className="app-main flex flex-col min-h-0">
         {phase === "auction" && (
           <>
-            {!myTeamId && (
-              <div className="shrink-0 px-2 pt-1">
-                <LobbyTeamGrid
-                  myTeamId={myTeamId}
-                  takenTeams={new Set(Object.keys(roomState.teams))}
-                  playerName={playerName || ""}
-                  socket={socketRef.current}
-                  isSpectator={isSpectator}
-                />
-              </div>
-            )}
+            <SpectatorBar roomState={roomState} myTeamId={myTeamId} socket={socketRef.current} />
             <AuctionPlayerStrip
               roomState={roomState}
               myTeamId={myTeamId}
@@ -392,11 +407,17 @@ export default function RoomPage() {
             />
 
             <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+              <BidToastStack
+                toasts={bidToasts}
+                roomState={roomState}
+                onDismiss={dismissBidToast}
+              />
               {activeTab === "chat" && (
                 <>
                   <AuctionChatTab
                     messages={roomState.chat}
                     activityFeed={roomState.activityFeed}
+                    roomState={roomState}
                     socket={socketRef.current}
                     disabled={isSpectator}
                     playerName={playerName || ""}
@@ -413,7 +434,14 @@ export default function RoomPage() {
                 <SquadTab roomState={roomState} myTeamId={myTeamId} playerName={playerName || ""} isHost={!!isHost} />
               )}
               {activeTab === "users" && (
-                <ParticipantsTab roomState={roomState} myTeamId={myTeamId} playerName={playerName || ""} isHost={!!isHost} />
+                <ParticipantsTab
+                  roomState={roomState}
+                  myTeamId={myTeamId}
+                  playerName={playerName || ""}
+                  isHost={!!isHost}
+                  variant="admin"
+                  socket={socketRef.current}
+                />
               )}
               {activeTab === "settings" && (
                 <RoomSettingsTab
@@ -456,17 +484,7 @@ export default function RoomPage() {
 
         {phase === "retention" && activeTab === "pick" && (
           <>
-            {!myTeamId && (
-              <div className="shrink-0 px-2 pt-1">
-                <LobbyTeamGrid
-                  myTeamId={myTeamId}
-                  takenTeams={new Set(Object.keys(roomState.teams))}
-                  playerName={playerName || ""}
-                  socket={socketRef.current}
-                  isSpectator={isSpectator}
-                />
-              </div>
-            )}
+            <SpectatorBar roomState={roomState} myTeamId={myTeamId} socket={socketRef.current} />
             <RetentionPhase roomState={roomState} myTeamId={myTeamId} socket={socketRef.current} />
           </>
         )}
@@ -488,7 +506,7 @@ export default function RoomPage() {
 
         {phase === "completed" && activeTab === "results" && (
           <div className="scroll-panel">
-            <AuctionComplete roomState={roomState} socket={socketRef.current} isHost={!!isHost} myTeamId={myTeamId} />
+            <AuctionComplete roomState={roomState} socket={socketRef.current} isHost={!!isHost} myTeamId={myTeamId} playerName={playerName || ""} />
           </div>
         )}
         {phase === "completed" && activeTab === "squad" && (

@@ -1,5 +1,6 @@
 /** Re-exports official IPL rules — use iplRules.ts for all auction logic */
 export {
+  MAX_FRANCHISES,
   TOTAL_PURSE,
   MAX_SQUAD_SIZE,
   MIN_SQUAD_SIZE,

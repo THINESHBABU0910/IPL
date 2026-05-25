@@ -8,13 +8,14 @@ import { Socket } from "socket.io-client";
 interface LobbyTeamGridProps {
   myTeamId: string | null;
   takenTeams: Set<string>;
+  vacantTeams?: Set<string>;
   playerName?: string;
   socket: Socket;
   isSpectator: boolean;
 }
 
 export default function LobbyTeamGrid({
-  myTeamId, takenTeams, playerName, socket, isSpectator,
+  myTeamId, takenTeams, vacantTeams = new Set(), playerName, socket, isSpectator,
 }: LobbyTeamGridProps) {
   const myTeam = myTeamId ? IPL_TEAMS.find((t) => t.id === myTeamId) : null;
 
@@ -32,23 +33,35 @@ export default function LobbyTeamGrid({
 
       <div className="grid grid-cols-5 gap-2">
         {IPL_TEAMS.map((team) => {
-          const taken = takenTeams.has(team.id);
+          const vacant = vacantTeams.has(team.id);
+          const taken = takenTeams.has(team.id) && !vacant;
           const isMine = team.id === myTeamId;
+          const canPick = !taken || isMine || vacant;
 
           return (
             <motion.button
               key={team.id}
-              whileTap={!taken || isMine ? { scale: 0.92 } : {}}
+              whileTap={canPick ? { scale: 0.92 } : {}}
               type="button"
               onClick={() => {
-                if (!taken || isMine) socket.emit("pick-team", { teamId: team.id });
+                if (canPick) socket.emit("pick-team", { teamId: team.id });
               }}
-              disabled={taken && !isMine}
-              className={`flex flex-col items-center gap-0.5 ${(taken && !isMine) ? "opacity-30" : ""}`}
+              disabled={!canPick}
+              className={`flex flex-col items-center gap-0.5 ${!canPick ? "opacity-30" : ""}`}
             >
-              <div className={`rounded-full p-0.5 ${isMine ? "ring-2 ring-[#F97316] ring-offset-1 ring-offset-[#1A1A1A]" : ""}`}>
+              <div className={`rounded-full p-0.5 relative ${
+                isMine ? "ring-2 ring-[#F97316] ring-offset-1 ring-offset-[#1A1A1A]"
+                  : vacant ? "ring-2 ring-amber-500 ring-offset-1 ring-offset-[#1A1A1A]"
+                  : ""
+              }`}>
                 <TeamLogo teamId={team.id} logoUrl={team.logoUrl} shortName={team.shortName} size={36} />
+                {vacant && (
+                  <span className="absolute -top-1 -right-1 text-[7px] bg-amber-500 text-black font-black px-1 rounded">OPEN</span>
+                )}
               </div>
+              {vacant && (
+                <span className="text-[7px] text-amber-400 font-bold">Take over</span>
+              )}
               {isMine && playerName && (
                 <span className="text-[8px] text-gray-500 truncate max-w-full">{playerName}</span>
               )}

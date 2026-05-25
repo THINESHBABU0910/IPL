@@ -38,6 +38,7 @@ export function saveRoomSnapshot(room: Room): void {
       activityFeed: room.activityFeed,
       retentionTimeLeft: room.retentionTimeLeft,
       minTeamsToStart: room.minTeamsToStart,
+      bidTimerSeconds: room.bidTimerSeconds,
       poolMeta: room.poolMeta,
       savedAt: Date.now(),
     };

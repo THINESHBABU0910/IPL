@@ -2,7 +2,7 @@ import { Player, BidResult } from "../lib/types";
 import {
   calculateBidIncrement, calculateNextBid, getOverseasBidCapLakhs,
   MAX_SQUAD_SIZE, MIN_SQUAD_SIZE, MAX_OVERSEAS, MIN_BASE_PRICE_LAKHS,
-  TIMER_INITIAL, TIMER_BID_RESET, TIMER_MAX, ROUND2_DISCOUNT, formatPrice,
+  TIMER_BID_RESET, ROUND2_DISCOUNT, formatPrice, validateRtmCapLimits,
 } from "../lib/iplRules";
 import {
   buildSetQueues, pickRandomFromSets, countPoolRemaining, flattenQueues,
@@ -66,11 +66,15 @@ export function presentNextPlayer(room: Room): Player | null {
   auction.currentBid = player.basePriceLakhs;
   auction.currentBidder = null;
   auction.nextBidAmount = player.basePriceLakhs;
-  auction.timerSeconds = TIMER_INITIAL;
+  auction.timerSeconds = room.bidTimerSeconds;
   auction.currentSetName = player.set;
   auction.isRTM = false;
   auction.rtmTeamId = null;
   auction.rtmPrice = 0;
+  auction.rtmPhase = "none";
+  auction.rtmWinningBidder = null;
+  auction.rtmEscalatedPrice = 0;
+  auction.rtmRaiseUsed = false;
   auction.bidHistory = [];
 
   return player;
@@ -81,6 +85,7 @@ export function processBid(room: Room, teamId: string): BidResult {
   const team = room.teams.get(teamId);
 
   if (!team) return { success: false, reason: "Team not found" };
+  if (team.isVacant) return { success: false, reason: "This team is vacant — claim it to bid" };
   if (auction.phase !== "auction" || !auction.currentPlayer)
     return { success: false, reason: "No active auction" };
   if (auction.isPaused)
@@ -124,7 +129,7 @@ export function processBid(room: Room, teamId: string): BidResult {
   auction.currentBid = bidAmount;
   auction.currentBidder = teamId;
   auction.nextBidAmount = calculateNextBid(bidAmount);
-  auction.timerSeconds = Math.min(auction.timerSeconds + TIMER_BID_RESET, TIMER_MAX);
+  auction.timerSeconds = Math.min(auction.timerSeconds + TIMER_BID_RESET, room.bidTimerSeconds + TIMER_BID_RESET);
   auction.bidHistory.push({ teamId, amount: bidAmount, timestamp: Date.now() });
 
   return { success: true };
@@ -174,6 +179,9 @@ export function checkRTM(room: Room, player: Player, buyerTeamId: string, salePr
   const team = room.teams.get(prevTeam);
   if (!team || team.rtmCards <= 0) return null;
 
+  const capErr = validateRtmCapLimits(team, player);
+  if (capErr) return null;
+
   const totalPlayers = team.squad.length + team.retainedPlayers.length;
   if (totalPlayers >= MAX_SQUAD_SIZE) return null;
   if (team.purse < salePrice) return null;
@@ -186,30 +194,119 @@ export function checkRTM(room: Room, player: Player, buyerTeamId: string, salePr
   return prevTeam;
 }
 
-export function executeRTM(room: Room, rtmTeamId: string, price: number): boolean {
+function getPendingSale(room: Room) {
+  const sold = room.auction.soldPlayers;
+  return sold.length ? sold[sold.length - 1] : null;
+}
+
+function updatePendingSalePrice(room: Room, newPrice: number): boolean {
+  const sale = getPendingSale(room);
+  if (!sale) return false;
+  const buyer = room.teams.get(sale.teamId);
+  if (!buyer) return false;
+  const diff = newPrice - sale.price;
+  if (diff > 0 && buyer.purse < diff) return false;
+  buyer.purse -= diff;
+  sale.price = newPrice;
+  return true;
+}
+
+/** RTM team invokes card → winning bidder gets one raise, then RTM team must match */
+export function startRtmEscalation(room: Room): { winningBidder: string; price: number } | null {
+  const sale = getPendingSale(room);
+  if (!sale || !room.auction.currentPlayer) return null;
+
+  room.auction.rtmPhase = "escalate";
+  room.auction.rtmWinningBidder = sale.teamId;
+  room.auction.rtmEscalatedPrice = sale.price;
+  room.auction.rtmRaiseUsed = false;
+  room.auction.rtmPrice = sale.price;
+
+  return { winningBidder: sale.teamId, price: sale.price };
+}
+
+export function processRtmRaise(room: Room): { success: boolean; newPrice?: number; reason?: string } {
   const { auction } = room;
-  if (!auction.currentPlayer) return false;
+  if (auction.rtmPhase !== "escalate") return { success: false, reason: "Not in RTM escalation" };
+  if (auction.rtmRaiseUsed) return { success: false, reason: "Final raise already used" };
 
-  const team = room.teams.get(rtmTeamId);
-  if (!team || team.rtmCards <= 0) return false;
-  if (team.purse < price) return false;
+  const base = auction.rtmEscalatedPrice || auction.rtmPrice || 0;
+  const newPrice = calculateNextBid(base);
+  const sale = getPendingSale(room);
+  if (!sale) return { success: false, reason: "No pending sale" };
 
-  const lastSale = auction.soldPlayers[auction.soldPlayers.length - 1];
-  if (lastSale) {
-    const buyerTeam = room.teams.get(lastSale.teamId);
-    if (buyerTeam) {
-      buyerTeam.squad = buyerTeam.squad.filter((p) => p.id !== lastSale.player.id);
-      buyerTeam.purse += lastSale.price;
-    }
-    auction.soldPlayers.pop();
+  const buyer = room.teams.get(sale.teamId);
+  if (!buyer) return { success: false, reason: "Winning bidder not found" };
+  const diff = newPrice - sale.price;
+  if (diff > 0 && buyer.purse < diff) return { success: false, reason: "Insufficient purse to raise" };
+
+  if (!updatePendingSalePrice(room, newPrice)) {
+    return { success: false, reason: "Could not apply raise" };
   }
 
-  team.squad.push(auction.currentPlayer);
+  auction.rtmEscalatedPrice = newPrice;
+  auction.rtmRaiseUsed = true;
+  auction.rtmPrice = newPrice;
+  return { success: true, newPrice };
+}
+
+export function beginRtmMatchPhase(room: Room): number {
+  room.auction.rtmPhase = "match";
+  return room.auction.rtmEscalatedPrice || room.auction.rtmPrice || 0;
+}
+
+export function completeRtmMatch(room: Room, rtmTeamId: string): { success: boolean; reason?: string; price?: number } {
+  const { auction } = room;
+  const player = auction.currentPlayer;
+  if (!player) return { success: false, reason: "No player in RTM" };
+
+  const price = auction.rtmEscalatedPrice || auction.rtmPrice || 0;
+  const team = room.teams.get(rtmTeamId);
+  if (!team || team.rtmCards <= 0) return { success: false, reason: "No RTM cards left" };
+
+  const capErr = validateRtmCapLimits(team, player);
+  if (capErr) return { success: false, reason: capErr };
+  if (team.purse < price) return { success: false, reason: "Insufficient purse to match" };
+
+  const sale = getPendingSale(room);
+  if (!sale) return { success: false, reason: "No pending sale" };
+
+  const buyer = room.teams.get(sale.teamId);
+  if (buyer) {
+    buyer.squad = buyer.squad.filter((p) => p.id !== player.id);
+    buyer.purse += sale.price;
+  }
+  auction.soldPlayers.pop();
+
+  team.squad.push(player);
   team.purse -= price;
   team.rtmCards--;
-  auction.soldPlayers.push({ player: auction.currentPlayer, teamId: rtmTeamId, price });
+  if (!team.rtmAcquisitions) team.rtmAcquisitions = [];
+  team.rtmAcquisitions.push(player);
+  auction.soldPlayers.push({ player, teamId: rtmTeamId, price });
 
-  return true;
+  return { success: true, price };
+}
+
+/** RTM team passes on match — winning bidder keeps player, RTM card restored */
+export function passRtmMatch(room: Room): { winningBidder: string; price: number } | null {
+  const sale = getPendingSale(room);
+  if (!sale) return null;
+  return { winningBidder: sale.teamId, price: sale.price };
+}
+
+export function clearRtmAuctionState(room: Room): void {
+  const { auction } = room;
+  auction.isRTM = false;
+  auction.rtmTeamId = null;
+  auction.rtmPhase = "none";
+  auction.rtmWinningBidder = null;
+  auction.rtmEscalatedPrice = 0;
+  auction.rtmRaiseUsed = false;
+  auction.rtmPrice = 0;
+  auction.rtmTimerSeconds = 0;
+  auction.isPaused = false;
+  auction.currentPlayer = null;
 }
 
 export function getRemainingCount(room: Room): number {

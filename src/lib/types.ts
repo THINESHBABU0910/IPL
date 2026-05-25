@@ -62,6 +62,9 @@ export interface TeamState {
   retentionPrices?: Record<string, number>;
   isBot?: boolean;
   isOnline?: boolean;
+  /** Players acquired via RTM (counts toward retention+RTM cap limits) */
+  rtmAcquisitions?: Player[];
+  isVacant?: boolean;
 }
 
 export interface BidEntry {
@@ -123,6 +126,11 @@ export interface AuctionState {
   rtmTeamId: string | null;
   rtmTimerSeconds: number;
   rtmPrice?: number;
+  /** IPL 2026 RTM: offer → escalate (bidder raises once) → match (RTM team matches or passes) */
+  rtmPhase?: "none" | "offer" | "escalate" | "match";
+  rtmWinningBidder?: string | null;
+  rtmEscalatedPrice?: number;
+  rtmRaiseUsed?: boolean;
   bidHistory: BidEntry[];
   round: number;
   isPaused: boolean;
@@ -167,6 +175,7 @@ export interface RoomState {
   participants: ParticipantInfo[];
   poolRemaining: number;
   minTeamsToStart: number;
+  bidTimerSeconds: number;
   upcomingPreview?: Player[];
   upcomingPreviewBySet?: SetPreviewGroup[];
 }
@@ -203,8 +212,9 @@ export interface ChatPayload {
 }
 
 export interface HostActionPayload {
-  action: "add-time" | "skip-player" | "pause" | "resume" | "kick" | "start-now" | "rematch" | "force-sold";
+  action: "add-time" | "remove-time" | "set-timer" | "skip-player" | "pause" | "resume" | "kick" | "start-now" | "rematch" | "force-sold";
   targetTeamId?: string;
+  timerSeconds?: number;
 }
 
 export interface ServerToClientEvents {
@@ -214,6 +224,7 @@ export interface ServerToClientEvents {
   "player-left": (data: { teamId?: string; playerName: string }) => void;
   "team-picked": (data: { teamId: string; playerName: string; socketId: string; sessionToken: string }) => void;
   "team-unpicked": (data: { teamId: string }) => void;
+  "team-vacated": (data: { teamId: string; previousOwner: string; message: string }) => void;
   "player-ready": (data: { teamId: string; isReady: boolean }) => void;
   "phase-change": (data: { phase: GamePhase }) => void;
   "retention-locked": (data: { teamId: string; count: number }) => void;
@@ -224,7 +235,16 @@ export interface ServerToClientEvents {
   "timer-tick": (data: { seconds: number; type?: "auction" | "retention" | "rtm" }) => void;
   "player-sold": (data: { player: Player; teamId: string; price: number }) => void;
   "player-unsold": (data: { player: Player }) => void;
-  "rtm-opportunity": (data: { player: Player; teamId: string; price: number; seconds: number }) => void;
+  "rtm-opportunity": (data: {
+    player: Player;
+    teamId: string;
+    price: number;
+    seconds: number;
+    phase: "offer" | "escalate" | "match";
+    winningBidder?: string;
+    escalatedPrice?: number;
+    raiseUsed?: boolean;
+  }) => void;
   "rtm-used": (data: { player: Player; teamId: string; price: number }) => void;
   "rtm-declined": (data: { player: Player }) => void;
   "rtm-tick": (data: { seconds: number }) => void;
@@ -248,6 +268,9 @@ export interface ClientToServerEvents {
   "place-bid": () => void;
   "use-rtm": () => void;
   "decline-rtm": () => void;
+  "rtm-raise": () => void;
+  "rtm-skip-raise": () => void;
+  "rtm-match": () => void;
   "reconnect-room": (data: { roomId: string; playerName?: string; sessionToken?: string }, callback: (res: { success: boolean; teamId?: string; error?: string }) => void) => void;
   "send-chat": (data: ChatPayload) => void;
   "host-action": (data: HostActionPayload) => void;
