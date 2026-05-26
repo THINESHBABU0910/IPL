@@ -7,9 +7,18 @@ const SIFY_CONFIG = {
   model: "meta-llama/Llama-3.1-8B-Instruct",
 } as const;
 
-/** Llama 3.2 3B context window — max_tokens must leave room for the prompt */
+/** Llama context — keep completion budget small so gateway responds before nginx timeout */
 const MODEL_CONTEXT_LIMIT = 131072;
 const TOKEN_SAFETY_BUFFER = 2048;
+/** Full scorecard JSON fits in ~4k tokens; huge values cause gateway 504 timeouts */
+const MAX_COMPLETION_TOKENS = 8192;
+const REQUEST_TIMEOUT_MS = 25_000;
+
+/** LLM is tried first by default; set AI_SIM_USE_LLM=false to skip straight to local sim */
+export function isLlmSimulationDisabled(): boolean {
+  const v = process.env.AI_SIM_USE_LLM?.toLowerCase();
+  return v === "false" || v === "0" || v === "no";
+}
 
 function estimateInputTokens(messages: ChatMessage[]): number {
   const chars = messages.reduce((sum, m) => sum + m.content.length, 0);
@@ -21,7 +30,7 @@ function estimateInputTokens(messages: ChatMessage[]): number {
 function computeMaxCompletionTokens(messages: ChatMessage[]): number {
   const inputEstimate = estimateInputTokens(messages);
   const available = MODEL_CONTEXT_LIMIT - inputEstimate - TOKEN_SAFETY_BUFFER;
-  return Math.max(4096, available);
+  return Math.min(MAX_COMPLETION_TOKENS, Math.max(2048, available));
 }
 
 export interface ChatMessage {
@@ -72,6 +81,7 @@ export async function callSifyChat(options: SifyCompletionOptions): Promise<Sify
       "Content-Type": "application/json",
     },
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
 
   if (!res.ok && res.status === 400) {
@@ -83,6 +93,7 @@ export async function callSifyChat(options: SifyCompletionOptions): Promise<Sify
         "Content-Type": "application/json",
       },
       body: JSON.stringify(withoutJsonMode),
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
   }
 
