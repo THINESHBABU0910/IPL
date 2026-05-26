@@ -1,7 +1,8 @@
 "use client";
 
 import { RoomState } from "@/lib/types";
-import { formatPrice, TOTAL_PURSE } from "@/lib/constants";
+import { formatLeaguePrice } from "@/lib/leagueRules";
+import { getLeagueConfig } from "@/data/leagueRegistry";
 import { motion } from "framer-motion";
 import { Socket } from "socket.io-client";
 import TeamLogo from "./TeamLogo";
@@ -16,6 +17,9 @@ interface AuctionCompleteProps {
 }
 
 export default function AuctionComplete({ roomState, socket, isHost, myTeamId, playerName }: AuctionCompleteProps) {
+  const league = roomState.league ?? "ipl";
+  const leagueConfig = getLeagueConfig(league);
+  const totalPurse = leagueConfig.rules.totalPurse;
   const teams = Object.entries(roomState.teams);
   const allSold = roomState.auction.soldPlayers;
 
@@ -26,7 +30,7 @@ export default function AuctionComplete({ roomState, socket, isHost, myTeamId, p
   const teamSpending = teams.map(([id, team]) => ({
     id,
     team,
-    spent: TOTAL_PURSE - team.purse,
+    spent: totalPurse - team.purse,
     total: team.squad.length + team.retainedPlayers.length,
   }));
 
@@ -42,7 +46,7 @@ export default function AuctionComplete({ roomState, socket, isHost, myTeamId, p
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `ipl-auction-${roomState.id}-${Date.now()}.json`;
+    a.download = `${league}-auction-${roomState.id}-${Date.now()}.json`;
     a.click();
     URL.revokeObjectURL(url);
   }
@@ -58,13 +62,13 @@ export default function AuctionComplete({ roomState, socket, isHost, myTeamId, p
           AUCTION COMPLETE
         </h1>
         <p className="text-gray-400 text-sm">
-          IPL 2026 · {allSold.length} players sold · {roomState.auction.unsoldPlayers.length} unsold
+          {leagueConfig.shortLabel} {leagueConfig.seasonLabel} · {allSold.length} players sold · {roomState.auction.unsoldPlayers.length} unsold
         </p>
         {myTeamId && roomState.teams[myTeamId] && (
           <p className="text-sm text-[#FFD700] mt-2">
             Your squad: {roomState.teams[myTeamId].shortName} ·{" "}
             {roomState.teams[myTeamId].squad.length + roomState.teams[myTeamId].retainedPlayers.length} players ·{" "}
-            Spent {formatPrice(TOTAL_PURSE - roomState.teams[myTeamId].purse)}
+            Spent {formatLeaguePrice(totalPurse - roomState.teams[myTeamId].purse, league)}
           </p>
         )}
       </motion.div>
@@ -74,7 +78,7 @@ export default function AuctionComplete({ roomState, socket, isHost, myTeamId, p
           <div className="ref-card p-4 text-center">
             <div className="text-xs text-gray-500 uppercase mb-1">Most Expensive</div>
             <div className="font-bold text-lg">{mostExpensive.player.name}</div>
-            <div className="text-[#FFD700] font-bold">{formatPrice(mostExpensive.price)}</div>
+            <div className="text-[#FFD700] font-bold">{formatLeaguePrice(mostExpensive.price, league)}</div>
             <div className="text-xs text-gray-400">to {roomState.teams[mostExpensive.teamId]?.shortName}</div>
           </div>
         )}
@@ -87,7 +91,7 @@ export default function AuctionComplete({ roomState, socket, isHost, myTeamId, p
                 {biggestSpender.team.shortName}
               </span>
             </div>
-            <div className="text-[#FFD700] font-bold">{formatPrice(biggestSpender.spent)}</div>
+            <div className="text-[#FFD700] font-bold">{formatLeaguePrice(biggestSpender.spent, league)}</div>
           </div>
         )}
         {mostPlayers && (

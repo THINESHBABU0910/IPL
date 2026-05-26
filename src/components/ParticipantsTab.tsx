@@ -2,7 +2,7 @@
 
 import { RoomState } from "@/lib/types";
 import TeamLogo from "./TeamLogo";
-import { TEAM_MAP } from "@/data/teams";
+import { getTeamMapForLeague } from "@/data/leagueRegistry";
 import { Socket } from "socket.io-client";
 
 interface ParticipantsTabProps {
@@ -49,7 +49,7 @@ export default function ParticipantsTab({
       <div className="scroll-panel space-y-2">
         {participants.map((p) => {
           const team = p.teamId ? roomState.teams[p.teamId] : null;
-          const teamDef = p.teamId ? TEAM_MAP[p.teamId] : null;
+          const teamDef = p.teamId ? getTeamMapForLeague(roomState.league)[p.teamId] : null;
           const isMe = p.playerName === playerName || p.teamId === myTeamId;
 
           return (

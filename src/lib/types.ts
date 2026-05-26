@@ -110,6 +110,7 @@ export interface ParticipantInfo {
 
 export type GamePhase = "lobby" | "retention" | "auction" | "completed";
 export type AuctionMode = "mega" | "custom_retention" | "flex_retention";
+export type LeagueId = "ipl" | "wpl" | "hundred";
 
 export interface AuctionState {
   currentPlayer: Player | null;
@@ -161,6 +162,7 @@ export interface RuntimeStatePayload {
 
 export interface RoomState {
   id: string;
+  league: LeagueId;
   mode: AuctionMode;
   teams: Record<string, TeamState>;
   auction: AuctionState;
@@ -187,6 +189,7 @@ export interface BidResult {
 
 export interface CreateRoomPayload {
   mode: AuctionMode;
+  league?: LeagueId;
   playerName: string;
 }
 

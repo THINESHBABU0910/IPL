@@ -24,7 +24,7 @@ import { AuctionActivity } from "@/lib/auctionActivity";
 import { Toaster, toast } from "sonner";
 import { saveSession, getSessionForRoom } from "@/lib/session";
 import { saveRoomArchive, getRoomArchive, isCompletedArchive, saveRoomProgress } from "@/lib/roomArchive";
-import { MAX_FRANCHISES } from "@/lib/constants";
+import { getLeagueConfig } from "@/data/leagueRegistry";
 import { isValidPlayerName, normalizePlayerName } from "@/lib/validateName";
 import {
   playBidSound, playSoldSound, playUnsoldSound, playRTMSound, playTimerWarning, playTimerFinalBeep, isSoundEnabled, setSoundEnabled,
@@ -92,7 +92,7 @@ export default function RoomPage() {
   }, [roomId]);
 
   const mergeRoomState = useCallback((state: RoomState) => {
-    setRoomState(state);
+    setRoomState({ ...state, league: state.league ?? "ipl" });
     setOfflineMode(false);
     setTimerSeconds(state.auction.timerSeconds);
     const socket = socketRef.current;
@@ -287,7 +287,8 @@ export default function RoomPage() {
   }
 
   function shareWhatsApp() {
-    window.open(`https://wa.me/?text=${encodeURIComponent(`Join my IPL Auction! ${window.location.origin}/room/${roomId}`)}`, "_blank");
+    const label = getLeagueConfig(roomState?.league ?? "ipl").shortLabel;
+    window.open(`https://wa.me/?text=${encodeURIComponent(`Join my ${label} Auction! ${window.location.origin}/room/${roomId}`)}`, "_blank");
   }
 
   function hostPauseResume() {
@@ -331,7 +332,8 @@ export default function RoomPage() {
   const phase = roomState.auction.phase;
   const participantCount = roomState.participants.length || Object.keys(roomState.teams).length;
   const joinedTeams = Object.values(roomState.teams).filter((t) => !t.isVacant).length;
-  const allTeamsIn = joinedTeams >= MAX_FRANCHISES;
+  const maxFr = getLeagueConfig(roomState.league).rules.maxFranchises;
+  const allTeamsIn = joinedTeams >= maxFr;
   const canHeaderStart = phase === "lobby" && (allTeamsIn || isHost) && joinedTeams >= 2;
   const mySquadSize = myTeamId && roomState.teams[myTeamId]
     ? roomState.teams[myTeamId].squad.length + roomState.teams[myTeamId].retainedPlayers.length

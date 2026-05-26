@@ -1,24 +1,26 @@
 import { Player, BidResult } from "../lib/types";
 import {
   calculateBidIncrement, calculateNextBid, getOverseasBidCapLakhs,
-  MAX_SQUAD_SIZE, MIN_SQUAD_SIZE, MAX_OVERSEAS, MIN_BASE_PRICE_LAKHS,
   TIMER_BID_RESET, ROUND2_DISCOUNT, formatPrice, validateRtmCapLimits,
 } from "../lib/iplRules";
+import { calculateNextBidForLeague, formatLeaguePrice } from "../lib/leagueRules";
+import { getRoomRules, getRoomLeague } from "./leagueHelpers";
 import {
   buildSetQueues, pickRandomFromSets, countPoolRemaining, flattenQueues,
 } from "../lib/auctionPool";
 import type { Room } from "./gameState";
 
-function applyRound2Discount(player: Player): Player {
+function applyRound2Discount(room: Room, player: Player): Player {
+  const rules = getRoomRules(room);
   const basePriceLakhs = Math.max(
-    MIN_BASE_PRICE_LAKHS,
-    Math.round(player.basePriceLakhs * ROUND2_DISCOUNT)
+    rules.minBasePriceLakhs,
+    Math.round(player.basePriceLakhs * rules.round2Discount),
   );
   return {
     ...player,
     basePriceLakhs,
     basePrice: basePriceLakhs * 100000,
-    displayPrice: formatPrice(basePriceLakhs),
+    displayPrice: formatLeaguePrice(basePriceLakhs, getRoomLeague(room)),
   };
 }
 
@@ -34,7 +36,7 @@ export function presentNextPlayer(room: Room): Player | null {
   if (!room.poolMeta || countPoolRemaining(room.poolMeta) === 0) {
     if (auction.round === 1 && auction.unsoldPlayers.length > 0) {
       auction.round = 2;
-      const discounted = auction.unsoldPlayers.map(applyRound2Discount);
+      const discounted = auction.unsoldPlayers.map((p) => applyRound2Discount(room, p));
       room.poolMeta = buildSetQueues(discounted, `${room.id}-round2-${Date.now()}`);
       auction.unsoldPlayers = [];
       syncRemainingPool(room);
@@ -49,7 +51,7 @@ export function presentNextPlayer(room: Room): Player | null {
   if (!result) {
     if (auction.round === 1 && auction.unsoldPlayers.length > 0) {
       auction.round = 2;
-      const discounted = auction.unsoldPlayers.map(applyRound2Discount);
+      const discounted = auction.unsoldPlayers.map((p) => applyRound2Discount(room, p));
       room.poolMeta = buildSetQueues(discounted, `${room.id}-round2-${Date.now()}`);
       auction.unsoldPlayers = [];
       syncRemainingPool(room);
@@ -83,6 +85,8 @@ export function presentNextPlayer(room: Room): Player | null {
 export function processBid(room: Room, teamId: string): BidResult {
   const { auction } = room;
   const team = room.teams.get(teamId);
+  const rules = getRoomRules(room);
+  const league = getRoomLeague(room);
 
   if (!team) return { success: false, reason: "Team not found" };
   if (team.isVacant) return { success: false, reason: "This team is vacant — claim it to bid" };
@@ -109,26 +113,26 @@ export function processBid(room: Room, teamId: string): BidResult {
     return { success: false, reason: "Insufficient purse" };
 
   const totalPlayers = team.squad.length + team.retainedPlayers.length;
-  if (totalPlayers >= MAX_SQUAD_SIZE)
-    return { success: false, reason: "Squad is full (max 25)" };
+  if (totalPlayers >= rules.maxSquadSize)
+    return { success: false, reason: `Squad is full (max ${rules.maxSquadSize})` };
 
   if (auction.currentPlayer.isOverseas) {
     const overseasCount = [...team.squad, ...team.retainedPlayers]
       .filter((p) => p.isOverseas).length;
-    if (overseasCount >= MAX_OVERSEAS)
-      return { success: false, reason: "Overseas limit reached (max 8)" };
+    if (overseasCount >= rules.maxOverseas)
+      return { success: false, reason: `Overseas limit reached (max ${rules.maxOverseas})` };
   }
 
-  const slotsNeeded = MIN_SQUAD_SIZE - totalPlayers - 1;
+  const slotsNeeded = rules.minSquadSize - totalPlayers - 1;
   if (slotsNeeded > 0) {
     const purseAfterBid = team.purse - bidAmount;
-    if (purseAfterBid < slotsNeeded * MIN_BASE_PRICE_LAKHS)
+    if (purseAfterBid < slotsNeeded * rules.minBasePriceLakhs)
       return { success: false, reason: "Must reserve budget for minimum squad" };
   }
 
   auction.currentBid = bidAmount;
   auction.currentBidder = teamId;
-  auction.nextBidAmount = calculateNextBid(bidAmount);
+  auction.nextBidAmount = calculateNextBidForLeague(bidAmount, league);
   auction.timerSeconds = Math.min(auction.timerSeconds + TIMER_BID_RESET, room.bidTimerSeconds + TIMER_BID_RESET);
   auction.bidHistory.push({ teamId, amount: bidAmount, timestamp: Date.now() });
 
@@ -182,13 +186,14 @@ export function checkRTM(room: Room, player: Player, buyerTeamId: string, salePr
   const capErr = validateRtmCapLimits(team, player);
   if (capErr) return null;
 
+  const rules = getRoomRules(room);
   const totalPlayers = team.squad.length + team.retainedPlayers.length;
-  if (totalPlayers >= MAX_SQUAD_SIZE) return null;
+  if (totalPlayers >= rules.maxSquadSize) return null;
   if (team.purse < salePrice) return null;
 
   if (player.isOverseas) {
     const overseasCount = [...team.squad, ...team.retainedPlayers].filter((p) => p.isOverseas).length;
-    if (overseasCount >= MAX_OVERSEAS) return null;
+    if (overseasCount >= rules.maxOverseas) return null;
   }
 
   return prevTeam;
@@ -231,7 +236,7 @@ export function processRtmRaise(room: Room): { success: boolean; newPrice?: numb
   if (auction.rtmRaiseUsed) return { success: false, reason: "Final raise already used" };
 
   const base = auction.rtmEscalatedPrice || auction.rtmPrice || 0;
-  const newPrice = calculateNextBid(base);
+  const newPrice = calculateNextBidForLeague(base, getRoomLeague(room));
   const sale = getPendingSale(room);
   if (!sale) return { success: false, reason: "No pending sale" };
 

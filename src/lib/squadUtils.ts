@@ -1,6 +1,6 @@
 import { Player, RoomState } from "./types";
-import { IPL_TEAMS } from "@/data/teams";
-import { TOTAL_PURSE } from "./constants";
+import { getTeamsForLeague } from "@/data/leagueRegistry";
+import { getLeagueConfig } from "@/data/leagueRegistry";
 
 export const ROLE_ORDER = ["WICKETKEEPER", "BATTER", "ALL-ROUNDER", "BOWLER"] as const;
 export const ROLE_LABELS: Record<string, string> = {
@@ -24,7 +24,7 @@ export function getTeamSoldPrices(teamId: string, roomState: RoomState): Record<
 }
 
 export function getSortedTeamIds(roomState: RoomState, myTeamId: string | null): string[] {
-  const ids = IPL_TEAMS.map((t) => t.id).filter((id) => roomState.teams[id]);
+  const ids = getTeamsForLeague(roomState.league).map((t) => t.id).filter((id) => roomState.teams[id]);
   return ids.sort((a, b) => {
     if (a === myTeamId) return -1;
     if (b === myTeamId) return 1;
@@ -44,7 +44,7 @@ export function getTeamPlayers(teamId: string, roomState: RoomState): Player[] {
 export function getTeamSpent(teamId: string, roomState: RoomState): number {
   const team = roomState.teams[teamId];
   if (!team) return 0;
-  return TOTAL_PURSE - team.purse;
+  return getLeagueConfig(roomState.league).rules.totalPurse - team.purse;
 }
 
 export function groupPlayersByRole(players: Player[]) {

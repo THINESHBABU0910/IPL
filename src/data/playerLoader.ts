@@ -1,20 +1,32 @@
-import { Player, PlayerJSON, PlayersData } from "@/lib/types";
+import { Player, PlayerJSON, PlayersData, LeagueId } from "@/lib/types";
 import { formatPrice, sortSetKey } from "@/lib/constants";
+import { formatLeaguePrice } from "@/lib/leagueRules";
 import playersRaw from "./players.json";
+import wplPlayersRaw from "./leagues/wpl/players.json";
+import hundredPlayersRaw from "./leagues/hundred/players.json";
 import { RETENTIONS_2026, PURSE_REMAINING_2026 } from "./retentions2026";
 
-const data = playersRaw as PlayersData;
+const LEAGUE_DATA: Record<LeagueId, PlayersData> = {
+  ipl: playersRaw as PlayersData,
+  wpl: wplPlayersRaw as PlayersData,
+  hundred: hundredPlayersRaw as PlayersData,
+};
 
-function normalizePlayer(p: PlayerJSON): Player {
+function normalizePlayer(p: PlayerJSON, league: LeagueId = "ipl"): Player {
   const basePriceLakhs = p.basePrice / 100000;
   return {
     ...p,
     basePriceLakhs,
-    displayPrice: formatPrice(basePriceLakhs),
+    displayPrice: formatLeaguePrice(basePriceLakhs, league),
   };
 }
 
-const allPlayers: Player[] = data.players.map(normalizePlayer);
+function loadLeaguePlayers(league: LeagueId): Player[] {
+  return LEAGUE_DATA[league].players.map((p) => normalizePlayer(p, league));
+}
+
+const data = playersRaw as PlayersData;
+const allPlayers: Player[] = loadLeaguePlayers("ipl");
 
 // Build sorted unique set names from data
 const uniqueSets = Array.from(new Set(allPlayers.map((p) => p.set)));
@@ -43,8 +55,12 @@ export function getSetShortLabel(setName: string): string {
   return full.replace(/ Players$/, "");
 }
 
-export function getAllPlayers(): Player[] {
-  return allPlayers;
+export function getAllPlayers(league: LeagueId = "ipl"): Player[] {
+  return loadLeaguePlayers(league);
+}
+
+export function getPlayersForTeam(teamId: string, league: LeagueId = "ipl"): Player[] {
+  return loadLeaguePlayers(league).filter((p) => p.previousTeam === teamId);
 }
 
 export function getSetOrder(): string[] {
@@ -59,7 +75,7 @@ export function getPlayersBySet(): Map<string, Player[]> {
   return map;
 }
 
-export function getPlayersForTeam(teamId: string): Player[] {
+export function getPlayersForTeamLegacy(teamId: string): Player[] {
   return allPlayers.filter((p) => p.previousTeam === teamId);
 }
 

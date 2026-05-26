@@ -1,7 +1,7 @@
 "use client";
 
 import { Socket } from "socket.io-client";
-import { IPL_TEAMS } from "@/data/teams";
+import { getTeamsForLeague } from "@/data/leagueRegistry";
 import { RoomState } from "@/lib/types";
 
 interface PickTeamDropdownProps {
@@ -28,7 +28,7 @@ export default function PickTeamDropdown({ roomState, myTeamId, socket }: PickTe
       }}
     >
       <option value="" disabled>Pick Team</option>
-      {IPL_TEAMS.map((t) => {
+      {getTeamsForLeague(roomState.league).map((t) => {
         const team = roomState.teams[t.id];
         const canPick = !team || !team.ownerId || team.isVacant;
         const label = !team || !team.ownerId || team.isVacant

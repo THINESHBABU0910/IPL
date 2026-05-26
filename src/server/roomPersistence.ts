@@ -16,6 +16,7 @@ export function saveRoomSnapshot(room: Room): void {
     ensureDir();
     const payload = {
       id: room.id,
+      league: room.league,
       mode: room.mode,
       hostId: room.hostId,
       hostName: room.hostName,

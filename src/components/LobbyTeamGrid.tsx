@@ -1,11 +1,12 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { IPL_TEAMS } from "@/data/teams";
+import { getTeamsForLeague } from "@/data/leagueRegistry";
 import TeamLogo from "./TeamLogo";
 import { Socket } from "socket.io-client";
 
 interface LobbyTeamGridProps {
+  league: import("@/lib/types").LeagueId;
   myTeamId: string | null;
   takenTeams: Set<string>;
   vacantTeams?: Set<string>;
@@ -15,9 +16,11 @@ interface LobbyTeamGridProps {
 }
 
 export default function LobbyTeamGrid({
-  myTeamId, takenTeams, vacantTeams = new Set(), playerName, socket, isSpectator,
+  league, myTeamId, takenTeams, vacantTeams = new Set(), playerName, socket, isSpectator,
 }: LobbyTeamGridProps) {
-  const myTeam = myTeamId ? IPL_TEAMS.find((t) => t.id === myTeamId) : null;
+  const teams = getTeamsForLeague(league);
+  const myTeam = myTeamId ? teams.find((t) => t.id === myTeamId) : null;
+  const gridCols = teams.length <= 5 ? "grid-cols-5" : "grid-cols-4";
 
   return (
     <div className="ref-card shrink-0">
@@ -31,8 +34,8 @@ export default function LobbyTeamGrid({
         )}
       </div>
 
-      <div className="grid grid-cols-5 gap-2">
-        {IPL_TEAMS.map((team) => {
+      <div className={`grid ${gridCols} gap-2`}>
+        {teams.map((team) => {
           const vacant = vacantTeams.has(team.id);
           const taken = takenTeams.has(team.id) && !vacant;
           const isMine = team.id === myTeamId;

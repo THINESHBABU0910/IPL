@@ -1,0 +1,4 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <circle cx="50" cy="50" r="48" fill="#E40046" stroke="#FFD100" stroke-width="3"/>
+  <text x="50" y="58" text-anchor="middle" font-family="Arial,sans-serif" font-weight="900" font-size="22" fill="#FFD100">WEF</text>
+</svg>

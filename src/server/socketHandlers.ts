@@ -21,7 +21,7 @@ import { isValidPlayerName, normalizePlayerName } from "../lib/validateName";
 import { getInitialRtmCards, isRetentionMode } from "../lib/iplRules";
 import { withRoomLock } from "./roomLock";
 import { saveRoomSnapshot, deleteRoomSnapshot, hydrateRoomsFromSnapshots, tryRestoreRoom } from "./roomPersistence";
-import { TEAM_MAP } from "../data/teams";
+import { parseLeagueId, getTeamMapForLeague } from "../data/leagueRegistry";
 
 type IOServer = Server<ClientToServerEvents, ServerToClientEvents>;
 type IOSocket = Socket<ClientToServerEvents, ServerToClientEvents>;
@@ -161,7 +161,7 @@ export function registerHandlers(io: IOServer): void {
       }
       let roomId = generateRoomCodeUtil();
       while (getRoom(roomId)) roomId = generateRoomCodeUtil();
-      const room = createRoom(roomId, data.mode, socket.id, playerName);
+      const room = createRoom(roomId, data.mode, socket.id, playerName, parseLeagueId(data.league));
       currentRoomId = room.id;
       socket.join(room.id);
       const token = room.sessionTokens.get(socket.id)!;
@@ -371,7 +371,7 @@ export function registerHandlers(io: IOServer): void {
         if (addTeamMidGame(room, data.teamId, socket.id, playerName)) {
           const token = room.sessionTokens.get(socket.id)!;
           room.tokenToSocket.set(token, { socketId: socket.id, teamId: data.teamId, isSpectator: false });
-          addActivity(room, "system", `${playerName} joined auction as ${TEAM_MAP[data.teamId]?.shortName || data.teamId}`);
+          addActivity(room, "system", `${playerName} joined auction as ${getTeamMapForLeague(parseLeagueId(room.league))[data.teamId]?.shortName || data.teamId}`);
           io.to(currentRoomId).emit("team-picked", {
             teamId: data.teamId, playerName, socketId: socket.id, sessionToken: token,
           });

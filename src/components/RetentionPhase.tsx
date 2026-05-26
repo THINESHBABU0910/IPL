@@ -3,14 +3,13 @@
 import { useState, useEffect, useMemo } from "react";
 import { RoomState, Player } from "@/lib/types";
 import { Socket } from "socket.io-client";
+import { getLeagueConfig, getTeamMapForLeague } from "@/data/leagueRegistry";
+import { getAllPlayers } from "@/data/playerLoader";
 import {
-  MAX_RETENTIONS, MAX_CAPPED_RETENTIONS, MAX_UNCAPPED_RETENTIONS,
-  FLEX_MAX_CAPPED_RETENTIONS, FLEX_MAX_UNCAPPED_RETENTIONS,
-  TOTAL_PURSE, formatPrice, calculateRetentionCost, calculateFlexRetentionCost,
-  RETENTION_SLOT_LABELS, RETENTION_COST_UNCAPPED,
-} from "@/lib/constants";
-import { TEAM_MAP } from "@/data/teams";
-import playersData from "@/data/players.json";
+  calculateRetentionCostForLeague,
+  formatLeaguePrice,
+} from "@/lib/leagueRules";
+import { calculateFlexRetentionCost } from "@/lib/constants";
 
 interface RetentionPhaseProps {
   roomState: RoomState;
@@ -18,20 +17,25 @@ interface RetentionPhaseProps {
   socket: Socket;
 }
 
-function mapPlayer(p: Player): Player {
+function mapPlayer(p: Player, league: import("@/lib/types").LeagueId): Player {
   const basePriceLakhs = p.basePrice / 100000;
-  return { ...p, basePriceLakhs, displayPrice: formatPrice(basePriceLakhs) };
+  return { ...p, basePriceLakhs, displayPrice: formatLeaguePrice(basePriceLakhs, league) };
 }
 
-function defaultFlexPrice(player: Player): number {
-  if (!player.isCapped) return RETENTION_COST_UNCAPPED;
-  return Math.max(player.basePriceLakhs, 400);
+function defaultFlexPrice(player: Player, uncappedCost: number): number {
+  if (!player.isCapped) return uncappedCost;
+  return Math.max(player.basePriceLakhs, uncappedCost);
 }
 
 export default function RetentionPhase({ roomState, myTeamId, socket }: RetentionPhaseProps) {
+  const league = roomState.league;
+  const rules = getLeagueConfig(league).rules;
+  const teamMap = getTeamMapForLeague(league);
   const isFlexMode = roomState.mode === "flex_retention";
-  const maxCapped = isFlexMode ? FLEX_MAX_CAPPED_RETENTIONS : MAX_CAPPED_RETENTIONS;
-  const maxUncapped = isFlexMode ? FLEX_MAX_UNCAPPED_RETENTIONS : MAX_UNCAPPED_RETENTIONS;
+  const maxCapped = isFlexMode ? rules.flexMaxCappedRetentions : rules.maxCappedRetentions;
+  const maxUncapped = isFlexMode ? rules.flexMaxUncappedRetentions : rules.maxUncappedRetentions;
+  const maxRetentions = rules.maxRetentions;
+  const totalPurse = rules.totalPurse;
 
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [customPrices, setCustomPrices] = useState<Record<string, number>>({});
@@ -52,8 +56,8 @@ export default function RetentionPhase({ roomState, myTeamId, socket }: Retentio
   const isLocked = myTeam?.retentionLocked ?? false;
 
   const allPlayers = useMemo(
-    () => (playersData.players as Player[]).map(mapPlayer),
-    [],
+    () => getAllPlayers(league).map((p) => mapPlayer(p, league)),
+    [league],
   );
 
   const squadPlayers = useMemo(() => {
@@ -80,7 +84,7 @@ export default function RetentionPhase({ roomState, myTeamId, socket }: Retentio
     return playerPool.filter((p) => {
       if (takenByOthers.has(p.id) && !selectedIds.includes(p.id)) return false;
       if (!q) return true;
-      const teamName = p.previousTeam && TEAM_MAP[p.previousTeam] ? TEAM_MAP[p.previousTeam].name : p.previousTeam;
+      const teamName = p.previousTeam && teamMap[p.previousTeam] ? teamMap[p.previousTeam].name : p.previousTeam;
       return (
         p.name.toLowerCase().includes(q) ||
         p.role.toLowerCase().includes(q) ||
@@ -97,7 +101,7 @@ export default function RetentionPhase({ roomState, myTeamId, socket }: Retentio
 
   const retentionCost = useMemo(() => {
     if (isFlexMode) return calculateFlexRetentionCost(customPrices, selectedIds);
-    return calculateRetentionCost(selectedPlayers);
+    return calculateRetentionCostForLeague(league, selectedPlayers);
   }, [isFlexMode, customPrices, selectedIds, selectedPlayers]);
 
   const cappedCount = selectedPlayers.filter((p) => p.isCapped).length;
@@ -118,12 +122,12 @@ export default function RetentionPhase({ roomState, myTeamId, socket }: Retentio
         return next;
       });
     } else {
-      if (selectedIds.length >= MAX_RETENTIONS) return;
+      if (selectedIds.length >= maxRetentions) return;
       if (player.isCapped && cappedCount >= maxCapped) return;
       if (!player.isCapped && uncappedCount >= maxUncapped) return;
       setSelectedIds([...selectedIds, playerId]);
       if (isFlexMode) {
-        setCustomPrices((prev) => ({ ...prev, [playerId]: defaultFlexPrice(player) }));
+        setCustomPrices((prev) => ({ ...prev, [playerId]: defaultFlexPrice(player, rules.retentionCostUncapped) }));
       }
     }
   }
@@ -153,7 +157,7 @@ export default function RetentionPhase({ roomState, myTeamId, socket }: Retentio
 
   const minutes = Math.floor(timerSeconds / 60);
   const seconds = timerSeconds % 60;
-  const purseLeft = TOTAL_PURSE - retentionCost;
+  const purseLeft = totalPurse - retentionCost;
   const canLock = !isLocked && selectedIds.length > 0 && purseLeft >= 0 &&
     (!isFlexMode || selectedIds.every((id) => (Number(customPrices[id]) || 0) > 0));
   const canSkip = !isLocked;
@@ -191,21 +195,21 @@ export default function RetentionPhase({ roomState, myTeamId, socket }: Retentio
           </div>
           <div className="text-right">
             <div className="text-[10px] text-gray-400">Spent</div>
-            <div className="text-lg font-bold text-red-400">{formatPrice(retentionCost)}</div>
-            <div className="text-[10px] text-emerald-400">Left {formatPrice(purseLeft)}</div>
+            <div className="text-lg font-bold text-red-400">{formatLeaguePrice(retentionCost, league)}</div>
+            <div className="text-[10px] text-emerald-400">Left {formatLeaguePrice(purseLeft, league)}</div>
           </div>
         </div>
         <div className="mt-2 h-1.5 rounded-full bg-black/40 overflow-hidden">
           <div
             className="h-full rounded-full bg-gradient-to-r from-ipl-gold to-yellow-300 transition-all duration-300"
-            style={{ width: `${Math.min(100, (retentionCost / TOTAL_PURSE) * 100)}%` }}
+            style={{ width: `${Math.min(100, (retentionCost / totalPurse) * 100)}%` }}
           />
         </div>
       </div>
 
       {!isFlexMode && (
         <p className="shrink-0 text-[10px] text-gray-500 px-1 mb-1.5">
-          Pick from your squad · Official slabs: {RETENTION_SLOT_LABELS.slice(0, 3).join(" · ")}
+          Pick from your squad · Official retention slabs apply
         </p>
       )}
       {isFlexMode && (
@@ -237,11 +241,11 @@ export default function RetentionPhase({ roomState, myTeamId, socket }: Retentio
         {filteredPlayers.map((player) => {
           const isSelected = selectedIds.includes(player.id);
           const isTaken = takenByOthers.has(player.id);
-          const canSelect = !isLocked && !isTaken && selectedIds.length < MAX_RETENTIONS &&
+          const canSelect = !isLocked && !isTaken && selectedIds.length < maxRetentions &&
             (player.isCapped ? cappedCount < maxCapped : uncappedCount < maxUncapped);
           const slotIdx = isSelected ? selectedIds.indexOf(player.id) : -1;
           const flexPrice = customPrices[player.id];
-          const prevTeam = player.previousTeam && TEAM_MAP[player.previousTeam];
+          const prevTeam = player.previousTeam && teamMap[player.previousTeam];
 
           return (
             <div
@@ -291,7 +295,7 @@ export default function RetentionPhase({ roomState, myTeamId, socket }: Retentio
                     className="flex-1 pro-input py-1.5 text-xs font-mono text-ipl-gold"
                   />
                   <span className="text-[10px] text-gray-500 shrink-0">
-                    {formatPrice(flexPrice ?? 0)}
+                    {formatLeaguePrice(flexPrice ?? 0, league)}
                   </span>
                 </div>
               )}
@@ -303,11 +307,11 @@ export default function RetentionPhase({ roomState, myTeamId, socket }: Retentio
       <div className="shrink-0 pt-2 border-t border-ipl-border/50">
         <div className="flex justify-between text-[10px] text-gray-400 mb-2 px-1">
           <span>
-            {selectedPlayers.length}/{MAX_RETENTIONS}
+            {selectedPlayers.length}/{maxRetentions}
             {` · Cap ${cappedCount}/${maxCapped} · UC ${uncappedCount}/${maxUncapped}`}
             {` · OS ${overseasCount}/8`}
           </span>
-          <span>RTM: {MAX_RETENTIONS - selectedPlayers.length}</span>
+          <span>RTM: {maxRetentions - selectedPlayers.length}</span>
         </div>
         {!isLocked ? (
           <div className="flex flex-col gap-2">
@@ -317,7 +321,7 @@ export default function RetentionPhase({ roomState, myTeamId, socket }: Retentio
               disabled={!canLock}
               className="w-full py-3 bid-btn rounded-xl text-black font-bold text-sm disabled:opacity-40"
             >
-              Lock Retentions · {formatPrice(retentionCost)}
+              Lock Retentions · {formatLeaguePrice(retentionCost, league)}
             </button>
             <button
               type="button"

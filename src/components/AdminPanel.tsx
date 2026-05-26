@@ -2,7 +2,7 @@
 
 import { RoomState } from "@/lib/types";
 import { Socket } from "socket.io-client";
-import { MAX_FRANCHISES } from "@/lib/constants";
+import { getLeagueConfig } from "@/data/leagueRegistry";
 
 interface AdminPanelProps {
   roomState: RoomState;
@@ -17,6 +17,7 @@ export default function AdminPanel({ roomState, socket, isHost }: AdminPanelProp
 
   const phase = roomState.auction.phase;
   const teams = Object.entries(roomState.teams);
+  const maxFr = getLeagueConfig(roomState.league).rules.maxFranchises;
   const joinedCount = teams.filter(([, t]) => !t.isVacant).length;
 
   function act(action: HostAction, targetTeamId?: string, timerSeconds?: number) {
@@ -36,7 +37,7 @@ export default function AdminPanel({ roomState, socket, isHost }: AdminPanelProp
       {phase === "lobby" && (
         <div className="space-y-2">
           <p className="text-xs text-gray-400">
-            {joinedCount}/{MAX_FRANCHISES} teams joined. Auto-starts at {MAX_FRANCHISES}/{MAX_FRANCHISES}, or start early below.
+            {joinedCount}/{maxFr} teams joined. Auto-starts at {maxFr}/{maxFr}, or start early below.
           </p>
           <AdminBtn label="▶ Start Game Now" primary onClick={() => act("start-now")} />
         </div>

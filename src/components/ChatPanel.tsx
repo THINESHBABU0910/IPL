@@ -4,7 +4,8 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { ChatMessage } from "@/lib/types";
 import { Socket } from "socket.io-client";
 import TeamLogo from "./TeamLogo";
-import { TEAM_MAP } from "@/data/teams";
+import { getTeamMapForLeague } from "@/data/leagueRegistry";
+import type { LeagueId } from "@/lib/types";
 import GifPicker, { gifUrlFromMessage } from "./GifPicker";
 
 interface ChatPanelProps {
@@ -14,10 +15,11 @@ interface ChatPanelProps {
   tall?: boolean;
   onMessage?: (msg: ChatMessage) => void;
   playerName?: string;
+  league?: LeagueId;
 }
 
 export default function ChatPanel({
-  messages, socket, disabled, tall, onMessage, playerName,
+  messages, socket, disabled, tall, onMessage, playerName, league = "ipl",
 }: ChatPanelProps) {
   const [text, setText] = useState("");
   const [localMessages, setLocalMessages] = useState<ChatMessage[]>(messages);
@@ -71,8 +73,8 @@ export default function ChatPanel({
           const gifUrl = gifUrlFromMessage(m.text);
           return (
             <div key={m.id} className={`flex items-start gap-2 text-xs ${m.id.startsWith("temp-") ? "opacity-60" : ""}`}>
-              {m.teamId && TEAM_MAP[m.teamId] && (
-                <TeamLogo teamId={m.teamId} logoUrl={TEAM_MAP[m.teamId].logoUrl} shortName={TEAM_MAP[m.teamId].shortName} size={20} />
+              {m.teamId && getTeamMapForLeague(league)[m.teamId] && (
+                <TeamLogo teamId={m.teamId} logoUrl={getTeamMapForLeague(league)[m.teamId].logoUrl} shortName={getTeamMapForLeague(league)[m.teamId].shortName} size={20} league={league} />
               )}
               <div>
                 <span className="text-[#FFD700] font-semibold">{m.playerName}</span>

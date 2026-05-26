@@ -2,12 +2,14 @@
 
 import { RoomState } from "@/lib/types";
 import { Socket } from "socket.io-client";
-import { TOTAL_PURSE, TIMER_BID_RESET, formatPrice } from "@/lib/constants";
+import { getLeagueConfig } from "@/data/leagueRegistry";
+import { formatLeaguePrice } from "@/lib/leagueRules";
+import { TIMER_BID_RESET } from "@/lib/constants";
 import AdminPanel from "./AdminPanel";
 
 const MODE_LABELS: Record<string, string> = {
   mega: "Mega Auction",
-  custom_retention: "IPL Retention",
+  custom_retention: "Official Retention",
   flex_retention: "Flex Retention",
 };
 
@@ -80,7 +82,7 @@ export default function RoomSettingsTab({
             <span className="text-base">₹</span>
             <span className="text-sm font-semibold text-white">Starting Purse</span>
           </div>
-          <span className="text-sm font-bold text-[#22C55E]">{formatPrice(TOTAL_PURSE)}</span>
+          <span className="text-sm font-bold text-[#22C55E]">{formatLeaguePrice(getLeagueConfig(roomState.league).rules.totalPurse, roomState.league)}</span>
         </div>
       </div>
 

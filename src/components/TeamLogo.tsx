@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import Image from "next/image";
-import { TEAM_MAP } from "@/data/teams";
+import { getTeamMapForLeague } from "@/data/leagueRegistry";
+import type { LeagueId } from "@/lib/types";
 
 interface TeamLogoProps {
   teamId: string;
@@ -10,11 +11,12 @@ interface TeamLogoProps {
   shortName: string;
   size?: number;
   className?: string;
+  league?: LeagueId;
 }
 
-export default function TeamLogo({ teamId, logoUrl, shortName, size = 40, className = "" }: TeamLogoProps) {
+export default function TeamLogo({ teamId, logoUrl, shortName, size = 40, className = "", league = "ipl" }: TeamLogoProps) {
   const [failed, setFailed] = useState(false);
-  const team = TEAM_MAP[teamId];
+  const team = getTeamMapForLeague(league)[teamId];
 
   if (failed || !logoUrl) {
     return (

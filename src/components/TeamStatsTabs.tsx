@@ -2,9 +2,9 @@
 
 import { useState } from "react";
 import { RoomState } from "@/lib/types";
-import { formatPrice, MAX_SQUAD_SIZE, MAX_OVERSEAS, TOTAL_PURSE } from "@/lib/constants";
+import { getTeamsForLeague, getTeamMapForLeague, getLeagueConfig } from "@/data/leagueRegistry";
+import { formatLeaguePrice } from "@/lib/leagueRules";
 import TeamLogo from "./TeamLogo";
-import { IPL_TEAMS } from "@/data/teams";
 
 interface TeamStatsTabsProps {
   roomState: RoomState;
@@ -13,8 +13,9 @@ interface TeamStatsTabsProps {
 }
 
 export default function TeamStatsTabs({ roomState, myTeamId, currentBidder }: TeamStatsTabsProps) {
-  const teamIds = IPL_TEAMS.map((t) => t.id).filter((id) => roomState.teams[id]);
-  const [active, setActive] = useState(myTeamId && roomState.teams[myTeamId] ? myTeamId : teamIds[0] || "CSK");
+  const rules = getLeagueConfig(roomState.league).rules;
+  const teamIds = getTeamsForLeague(roomState.league).map((t) => t.id).filter((id) => roomState.teams[id]);
+  const [active, setActive] = useState(myTeamId && roomState.teams[myTeamId] ? myTeamId : teamIds[0] || teamIds[0]);
 
   const activeTeam = roomState.teams[active];
 
@@ -36,7 +37,7 @@ export default function TeamStatsTabs({ roomState, myTeamId, currentBidder }: Te
             >
               <TeamLogo teamId={id} logoUrl={t.logoUrl} shortName={t.shortName} size={28} />
               <span className="text-[10px] font-bold mt-0.5" style={{ color: t.primaryColor }}>{t.shortName}</span>
-              <span className="text-[9px] text-gray-500">{total}/25 · OS {os}/{MAX_OVERSEAS}</span>
+              <span className="text-[9px] text-gray-500">{total}/{rules.maxSquadSize} · OS {os}/{rules.maxOverseas}</span>
             </button>
           );
         })}
@@ -53,10 +54,10 @@ export default function TeamStatsTabs({ roomState, myTeamId, currentBidder }: Te
           </div>
 
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4">
-            <StatBox label="Purse Left" value={formatPrice(activeTeam.purse)} highlight />
-            <StatBox label="Spent" value={formatPrice(TOTAL_PURSE - activeTeam.purse)} />
-            <StatBox label="Players" value={`${activeTeam.squad.length + activeTeam.retainedPlayers.length}/${MAX_SQUAD_SIZE}`} />
-            <StatBox label="Overseas" value={`${[...activeTeam.squad, ...activeTeam.retainedPlayers].filter((p) => p.isOverseas).length}/${MAX_OVERSEAS}`} />
+            <StatBox label="Purse Left" value={formatLeaguePrice(activeTeam.purse, roomState.league)} highlight />
+            <StatBox label="Spent" value={formatLeaguePrice(rules.totalPurse - activeTeam.purse, roomState.league)} />
+            <StatBox label="Players" value={`${activeTeam.squad.length + activeTeam.retainedPlayers.length}/${rules.maxSquadSize}`} />
+            <StatBox label="Overseas" value={`${[...activeTeam.squad, ...activeTeam.retainedPlayers].filter((p) => p.isOverseas).length}/${rules.maxOverseas}`} />
             {activeTeam.rtmCards > 0 && <StatBox label="RTM Cards" value={String(activeTeam.rtmCards)} />}
           </div>
 
@@ -72,7 +73,7 @@ export default function TeamStatsTabs({ roomState, myTeamId, currentBidder }: Te
                   key={p.id}
                   name={p.name}
                   role={p.role}
-                  tag={sale ? formatPrice(sale.price) : p.displayPrice}
+                  tag={sale ? formatLeaguePrice(sale.price, roomState.league) : p.displayPrice}
                   overseas={p.isOverseas}
                 />
               );

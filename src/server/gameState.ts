@@ -2,16 +2,29 @@ import {
 
   Player, PlayerJSON, PlayersData, TeamState, AuctionState, RoomState,
 
-  AuctionMode, ChatMessage, ActivityEntry, ParticipantInfo, TeamDef, RuntimeStatePayload,
+  AuctionMode, ChatMessage, ActivityEntry, ParticipantInfo, TeamDef, RuntimeStatePayload, LeagueId,
 
 } from "../lib/types";
 
 import {
-  TOTAL_PURSE, formatPrice, MAX_FRANCHISES,
-  MAX_RETENTIONS, MAX_OVERSEAS, TIMER_INITIAL, ROUND2_DISCOUNT,
+  formatPrice, TIMER_INITIAL, ROUND2_DISCOUNT,
   calculateRetentionCost, validateRetentions, validateFlexRetentions,
-  calculateFlexRetentionCost, getInitialRtmCards, normalizePriceLakhs,
+  calculateFlexRetentionCost, normalizePriceLakhs,
 } from "../lib/iplRules";
+
+import {
+  calculateRetentionCostForLeague,
+  validateRetentionsForLeague,
+  validateFlexRetentionsForLeague,
+  getInitialRtmCardsForLeague,
+  formatLeaguePrice,
+} from "../lib/leagueRules";
+
+import { parseLeagueId, getLeagueConfig } from "../data/leagueRegistry";
+
+import {
+  getRoomMaxFranchises, getRoomTotalPurse, getRoomTeamDef, getRoomLeague, getRoomRules,
+} from "./leagueHelpers";
 
 import { buildSetQueues, countPoolRemaining, previewBySet, flattenQueues, PoolMeta } from "../lib/auctionPool";
 
@@ -27,71 +40,55 @@ import { randomBytes } from "crypto";
 
 // ---------- Player loading ----------
 
+const playersCacheByLeague = new Map<LeagueId, Player[]>();
+const playerByIdCacheByLeague = new Map<LeagueId, Map<string, Player>>();
 
+function resolvePlayersPath(league: LeagueId): string {
+  const file = league === "ipl" ? "players.json" : `leagues/${league}/players.json`;
+  const candidates = [
+    path.join(process.cwd(), "src", "data", file),
+    path.join(__dirname, "..", "data", file),
+    path.join(__dirname, "..", "..", "src", "data", file),
+  ];
+  for (const p of candidates) {
+    if (fs.existsSync(p)) return p;
+  }
+  throw new Error(`Could not find players file for league ${league}`);
+}
 
-let playersCache: Player[] | null = null;
-let playerByIdCache: Map<string, Player> | null = null;
+export function loadPlayersForLeague(league: LeagueId = "ipl"): Player[] {
+  const cached = playersCacheByLeague.get(league);
+  if (cached) return cached;
+
+  const raw = fs.readFileSync(resolvePlayersPath(league), "utf-8");
+  const data = JSON.parse(raw) as PlayersData;
+  const players = data.players.map((pl: PlayerJSON) => {
+    const basePriceLakhs = pl.basePrice / 100000;
+    return { ...pl, basePriceLakhs, displayPrice: formatLeaguePrice(basePriceLakhs, league) };
+  });
+  playersCacheByLeague.set(league, players);
+  playerByIdCacheByLeague.set(league, new Map(players.map((pl) => [pl.id, pl])));
+  return players;
+}
 
 function loadPlayersFromDisk(): Player[] {
-
-  if (playersCache) {
-    if (!playerByIdCache) {
-      playerByIdCache = new Map(playersCache.map((pl) => [pl.id, pl]));
-    }
-    return playersCache;
-  }
-
-  const candidates = [
-
-    path.join(process.cwd(), "src", "data", "players.json"),
-
-    path.join(__dirname, "..", "data", "players.json"),
-
-    path.join(__dirname, "..", "..", "src", "data", "players.json"),
-
-  ];
-
-  for (const p of candidates) {
-
-    try {
-
-      const raw = fs.readFileSync(p, "utf-8");
-
-      const data = JSON.parse(raw) as PlayersData;
-
-      playersCache = data.players.map((pl: PlayerJSON) => {
-
-        const basePriceLakhs = pl.basePrice / 100000;
-
-        return { ...pl, basePriceLakhs, displayPrice: formatPrice(basePriceLakhs) };
-
-      });
-
-      playerByIdCache = new Map(playersCache.map((pl) => [pl.id, pl]));
-
-      return playersCache;
-
-    } catch { /* try next */ }
-
-  }
-
-  throw new Error("Could not load players.json");
-
+  return loadPlayersForLeague("ipl");
 }
 
-function getPlayerById(id: string): Player | undefined {
-  loadPlayersFromDisk();
-  return playerByIdCache?.get(String(id).trim());
+function getPlayerById(id: string, league: LeagueId = "ipl"): Player | undefined {
+  loadPlayersForLeague(league);
+  return playerByIdCacheByLeague.get(league)?.get(String(id).trim());
 }
 
-function resolvePlayersByIds(ids: string[]): { found: Player[]; missing: string[] } {
-  const all = loadPlayersFromDisk();
+function resolvePlayersByIds(ids: string[], league: LeagueId = "ipl"): { found: Player[]; missing: string[] } {
+  const all = loadPlayersForLeague(league);
+  const cache = playerByIdCacheByLeague.get(league);
   const found: Player[] = [];
   const missing: string[] = [];
   const uniqueIds = [...new Set(ids.map((id) => String(id).trim()).filter(Boolean))];
 
   for (const id of uniqueIds) {
-    const p = playerByIdCache?.get(id) ?? all.find((pl) => pl.id === id);
+    const p = cache?.get(id) ?? all.find((pl) => pl.id === id);
     if (p) found.push(p);
     else missing.push(id);
   }
@@ -144,6 +141,8 @@ const TEAM_MAP = new Map(IPL_TEAMS.map((t) => [t.id, t]));
 export interface Room {
 
   id: string;
+
+  league: LeagueId;
 
   mode: AuctionMode;
 
@@ -216,13 +215,17 @@ export function generateSessionToken(): string {
 
 
 
-export function createRoom(roomId: string, mode: AuctionMode, hostSocketId: string, hostName: string): Room {
+export function createRoom(roomId: string, mode: AuctionMode, hostSocketId: string, hostName: string, league: LeagueId = "ipl"): Room {
 
   const token = generateSessionToken();
+  const leagueId = parseLeagueId(league);
+  const maxFranchises = getLeagueConfig(leagueId).rules.maxFranchises;
 
   const room: Room = {
 
     id: roomId.toUpperCase(),
+
+    league: leagueId,
 
     mode,
 
@@ -262,7 +265,7 @@ export function createRoom(roomId: string, mode: AuctionMode, hostSocketId: stri
 
     retentionTimeLeft: 180,
 
-    minTeamsToStart: MAX_FRANCHISES,
+    minTeamsToStart: maxFranchises,
 
     bidTimerSeconds: TIMER_INITIAL,
 
@@ -485,7 +488,7 @@ export function addTeam(
 
   if (room.teams.has(teamId)) return false;
 
-  const def = TEAM_MAP.get(teamId);
+  const def = getRoomTeamDef(room, teamId);
 
   if (!def) return false;
 
@@ -495,7 +498,7 @@ export function addTeam(
 
     ...def,
 
-    purse: TOTAL_PURSE,
+    purse: getRoomTotalPurse(room),
 
     squad: [],
 
@@ -617,15 +620,16 @@ export function allReady(room: Room): boolean {
 
 export function allTeamsJoined(room: Room): boolean {
   const active = [...room.teams.values()].filter((t) => !t.isVacant).length;
-  return active >= MAX_FRANCHISES;
+  return active >= getRoomMaxFranchises(room);
 }
 
 export function canStartAuction(room: Room, byHost: boolean): { ok: boolean; reason?: string } {
   if (room.auction.phase !== "lobby") return { ok: false, reason: "Auction already started" };
+  const maxFr = getRoomMaxFranchises(room);
   const teamCount = [...room.teams.values()].filter((t) => !t.isVacant).length;
   if (teamCount < 2) return { ok: false, reason: "Need at least 2 teams to start" };
   if (!byHost && !allTeamsJoined(room)) {
-    return { ok: false, reason: `Waiting for all ${MAX_FRANCHISES} teams (${teamCount}/${MAX_FRANCHISES} joined)` };
+    return { ok: false, reason: `Waiting for all ${maxFr} teams (${teamCount}/${maxFr} joined)` };
   }
   return { ok: true };
 }
@@ -653,7 +657,7 @@ export function claimOpenTeam(
 
   if (room.auction.phase === "retention" && !team.retentionLocked) {
     team.retentionLocked = true;
-    team.rtmCards = getInitialRtmCards(room.mode, team.retainedPlayers.length);
+    team.rtmCards = getInitialRtmCardsForLeague(getRoomLeague(room), room.mode, team.retainedPlayers.length);
   }
 
   const token = room.sessionTokens.get(socketId);
@@ -672,8 +676,8 @@ export function addTeamMidGame(
   team.retentionLocked = true;
   team.retainedPlayers = [];
   team.retentionPrices = undefined;
-  team.purse = TOTAL_PURSE;
-  team.rtmCards = getInitialRtmCards(room.mode, 0);
+  team.purse = getRoomTotalPurse(room);
+  team.rtmCards = getInitialRtmCardsForLeague(getRoomLeague(room), room.mode, 0);
   return true;
 }
 
@@ -787,21 +791,21 @@ export function lockRetentions(
   const normalizedIds = normalizeRetentionPlayerIds(playerIds);
   const flexMode = isFlexRetentionMode(room);
 
-  // Allow skipping retention (0 players) — full ₹120 Cr purse for auction
+  // Allow skipping retention (0 players) — full purse for auction
   if (!normalizedIds.length) {
     team.retainedPlayers = [];
     team.retentionPrices = undefined;
-    team.purse = TOTAL_PURSE;
-    team.rtmCards = getInitialRtmCards(room.mode, 0);
+    team.purse = getRoomTotalPurse(room);
+    team.rtmCards = getInitialRtmCardsForLeague(getRoomLeague(room), room.mode, 0);
     team.retentionLocked = true;
     return null;
   }
 
-  const allPlayers = loadPlayersFromDisk();
+  const allPlayers = loadPlayersForLeague(getRoomLeague(room));
   let selected: Player[];
 
   if (flexMode) {
-    const { found, missing } = resolvePlayersByIds(normalizedIds);
+    const { found, missing } = resolvePlayersByIds(normalizedIds, getRoomLeague(room));
     if (missing.length) {
       return `Unknown player ID(s): ${missing.join(", ")}`;
     }
@@ -818,7 +822,7 @@ export function lockRetentions(
       else missing.push(id);
     }
     if (missing.length) {
-      return `Pick players from your ${team.shortName} squad only (IPL Retention mode). Unknown: ${missing.join(", ")}`;
+      return `Pick players from your ${team.shortName} squad only (Retention mode). Unknown: ${missing.join(", ")}`;
     }
   }
 
@@ -834,28 +838,31 @@ export function lockRetentions(
   let cost: number;
   const prices = normalizeCustomPrices(normalizedIds, customPrices);
 
+  const league = getRoomLeague(room);
+  const totalPurse = getRoomTotalPurse(room);
+
   if (flexMode) {
-    const err = validateFlexRetentions(selected, prices);
+    const err = validateFlexRetentionsForLeague(league, selected, prices);
     if (err) return err;
     cost = calculateFlexRetentionCost(prices, normalizedIds);
     team.retentionPrices = { ...prices };
     team.retainedPlayers = selected.map((p) => ({
       ...p,
       basePriceLakhs: prices[p.id],
-      displayPrice: formatPrice(prices[p.id]),
+      displayPrice: formatLeaguePrice(prices[p.id], league),
     }));
   } else {
-    const err = validateRetentions(selected);
+    const err = validateRetentionsForLeague(league, selected);
     if (err) return err;
-    cost = calculateRetentionCost(selected);
+    cost = calculateRetentionCostForLeague(league, selected);
     team.retentionPrices = undefined;
     team.retainedPlayers = selected;
   }
 
-  if (cost > TOTAL_PURSE) return "Retention cost exceeds purse";
+  if (cost > totalPurse) return "Retention cost exceeds purse";
 
-  team.purse = TOTAL_PURSE - cost;
-  team.rtmCards = getInitialRtmCards(room.mode, selected.length);
+  team.purse = totalPurse - cost;
+  team.rtmCards = getInitialRtmCardsForLeague(league, room.mode, selected.length);
   team.retentionLocked = true;
 
   return null;
@@ -884,7 +891,7 @@ export function allRetentionsLocked(room: Room): boolean {
 
 export function setupAuctionPool(room: Room): void {
 
-  const allPlayers = loadPlayersFromDisk();
+  const allPlayers = loadPlayersForLeague(getRoomLeague(room));
 
   let poolPlayers: Player[];
 
@@ -893,8 +900,8 @@ export function setupAuctionPool(room: Room): void {
     poolPlayers = allPlayers;
 
     for (const team of room.teams.values()) {
-      team.purse = TOTAL_PURSE;
-      team.rtmCards = getInitialRtmCards("mega", 0);
+      team.purse = getRoomTotalPurse(room);
+      team.rtmCards = getInitialRtmCardsForLeague(getRoomLeague(room), "mega", 0);
     }
 
   } else {
@@ -958,7 +965,7 @@ export function resetRoomForRematch(room: Room): void {
 
     team.rtmAcquisitions = [];
 
-    team.purse = TOTAL_PURSE;
+    team.purse = getRoomTotalPurse(room);
 
     team.isReady = team.isBot ?? false;
 
@@ -991,6 +998,8 @@ export function serializeRoom(room: Room, io?: { sockets: { sockets: Map<string,
   return {
 
     id: room.id,
+
+    league: getRoomLeague(room),
 
     mode: room.mode,
 
@@ -1043,13 +1052,15 @@ export function importRoomFromSnapshot(raw: Record<string, unknown>): Room | nul
     const remainingIds = (auctionRaw.remainingPoolIds as string[]) || [];
     delete auctionRaw.remainingPoolIds;
 
-    loadPlayersFromDisk();
+    loadPlayersForLeague(parseLeagueId(raw.league));
+    const leagueId = parseLeagueId(raw.league);
     const remainingPool = remainingIds
-      .map((pid) => playerByIdCache?.get(pid))
+      .map((pid) => playerByIdCacheByLeague.get(leagueId)?.get(pid))
       .filter((p): p is Player => !!p);
 
     const room: Room = {
       id,
+      league: leagueId,
       mode: raw.mode as AuctionMode,
       teams: new Map(Object.entries((raw.teams as Record<string, TeamState>) || {})),
       auction: { ...(auctionRaw as unknown as AuctionState), remainingPool },
@@ -1073,7 +1084,7 @@ export function importRoomFromSnapshot(raw: Record<string, unknown>): Room | nul
       retentionTimerInterval: null,
       cleanupTimer: null,
       retentionTimeLeft: Number(raw.retentionTimeLeft) || 0,
-      minTeamsToStart: Number(raw.minTeamsToStart) || MAX_FRANCHISES,
+      minTeamsToStart: Number(raw.minTeamsToStart) || getLeagueConfig(leagueId).rules.maxFranchises,
       createdAt: Number(raw.createdAt) || Date.now(),
       bidTimerSeconds: Number(raw.bidTimerSeconds) || TIMER_INITIAL,
       poolMeta: (raw.poolMeta as PoolMeta) || null,

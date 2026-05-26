@@ -1,7 +1,7 @@
 "use client";
 
 import { RoomState } from "@/lib/types";
-import { MAX_FRANCHISES } from "@/lib/constants";
+import { getLeagueConfig } from "@/data/leagueRegistry";
 import { Socket } from "socket.io-client";
 import InviteFriendsCard from "./InviteFriendsCard";
 import LobbyTeamGrid from "./LobbyTeamGrid";
@@ -34,15 +34,16 @@ export default function Lobby({
   const takenTeams = new Set(
     Object.keys(roomState.teams).filter((id) => !vacantTeams.has(id)),
   );
+  const maxFranchises = getLeagueConfig(roomState.league).rules.maxFranchises;
   const totalTeams = Object.keys(roomState.teams).length - vacantTeams.size;
-  const freeTeams = MAX_FRANCHISES - totalTeams;
-  const allJoined = totalTeams >= MAX_FRANCHISES;
+  const freeTeams = maxFranchises - totalTeams;
+  const allJoined = totalTeams >= maxFranchises;
   const canStart = allJoined || !!isHost;
 
   if (activeTab === "chat") {
     return (
       <div className="panel-fill px-2 pb-1">
-        <ChatPanel messages={roomState.chat} socket={socket} disabled={isSpectator} playerName={playerName} tall />
+        <ChatPanel messages={roomState.chat} socket={socket} disabled={isSpectator} playerName={playerName} tall league={roomState.league} />
       </div>
     );
   }
@@ -65,6 +66,7 @@ export default function Lobby({
       <InviteFriendsCard roomId={roomId} />
 
       <LobbyTeamGrid
+        league={roomState.league}
         myTeamId={myTeamId}
         takenTeams={takenTeams}
         vacantTeams={vacantTeams}
@@ -79,12 +81,12 @@ export default function Lobby({
 
       <div className="shrink-0 pt-1 border-t border-[#2A2A2A]">
         <p className="text-[10px] text-gray-500 text-center mb-1">
-          {totalTeams}/{MAX_FRANCHISES} teams joined · {freeTeams} free
+          {totalTeams}/{maxFranchises} teams joined · {freeTeams} free
           {vacantTeams.size > 0 && ` · ${vacantTeams.size} open for takeover`}
         </p>
         {!allJoined && (
           <p className="text-[10px] text-amber-400/90 text-center mb-2">
-            Auction starts when all {MAX_FRANCHISES} teams join{isHost ? ", or when you start as host" : ""}
+            Auction starts when all {maxFranchises} teams join{isHost ? ", or when you start as host" : ""}
           </p>
         )}
         {allJoined && (
@@ -102,8 +104,8 @@ export default function Lobby({
           {allJoined
             ? "▶ Start Game"
             : isHost
-              ? `▶ Start Early (${totalTeams}/${MAX_FRANCHISES} teams)`
-              : `Waiting (${totalTeams}/${MAX_FRANCHISES} teams)`}
+              ? `▶ Start Early (${totalTeams}/${maxFranchises} teams)`
+              : `Waiting (${totalTeams}/${maxFranchises} teams)`}
         </button>
         <p className="text-[9px] text-gray-600 text-center mt-1.5">You can leave and return anytime before auction starts</p>
       </div>

@@ -2,9 +2,11 @@
 
 import { useState, useCallback, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { getSocket } from "@/lib/socket";
-import { AuctionMode } from "@/lib/types";
-import { TEAM_MAP } from "@/data/teams";
+import { AuctionMode, LeagueId } from "@/lib/types";
+import { getTeamMapForLeague, getLeagueConfig, LEAGUE_TABS, parseLeagueId } from "@/data/leagueRegistry";
+import { getModeSubtitle } from "@/lib/leagueRules";
 import { saveSession, getSessionForRoom } from "@/lib/session";
 import { listRoomArchives, isCompletedArchive } from "@/lib/roomArchive";
 import { isValidPlayerName, normalizePlayerName } from "@/lib/validateName";
@@ -14,44 +16,34 @@ interface RecentRoom {
   teamId: string;
   playerName: string;
   mode: string;
+  league?: LeagueId;
   joinedAt: number;
 }
 
 const MODES: {
   id: AuctionMode;
   title: string;
-  subtitle: string;
   icon: string;
   accent: string;
 }[] = [
-  {
-    id: "mega",
-    title: "Mega Auction",
-    subtitle: "Full player pool · Up to 6 RTM (6 − retentions) · ₹120 Cr purse",
-    icon: "🏟️",
-    accent: "from-amber-500/20 to-orange-600/10",
-  },
-  {
-    id: "custom_retention",
-    title: "IPL Retention",
-    subtitle: "Official slabs · Pick squad · RTM after lock",
-    icon: "🔒",
-    accent: "from-blue-500/20 to-indigo-600/10",
-  },
-  {
-    id: "flex_retention",
-    title: "Flex Retention",
-    subtitle: "Any player · Your prices · 4 cap + 2 UC · ₹120 Cr purse",
-    icon: "💰",
-    accent: "from-emerald-500/20 to-teal-600/10",
-  },
+  { id: "mega", title: "Mega Auction", icon: "🏟️", accent: "from-amber-500/20 to-orange-600/10" },
+  { id: "custom_retention", title: "Official Retention", icon: "🔒", accent: "from-blue-500/20 to-indigo-600/10" },
+  { id: "flex_retention", title: "Flex Retention", icon: "💰", accent: "from-emerald-500/20 to-teal-600/10" },
 ];
 
 const MODE_LABELS: Record<string, string> = {
   mega: "Mega",
-  custom_retention: "IPL Retention",
-  flex_retention: "Flex Retention",
+  custom_retention: "Retention",
+  flex_retention: "Flex",
 };
+
+const LEAGUE_LABELS: Record<LeagueId, string> = {
+  ipl: "IPL",
+  wpl: "WPL",
+  hundred: "The Hundred",
+};
+
+const PREFERRED_LEAGUE_KEY = "preferredLeague";
 
 function getRecentRooms(): RecentRoom[] {
   try {
@@ -71,6 +63,7 @@ export default function HomePage() {
   const router = useRouter();
   const [screenTab, setScreenTab] = useState<"play" | "recent">("play");
   const [actionTab, setActionTab] = useState<"create" | "join">("create");
+  const [selectedLeague, setSelectedLeague] = useState<LeagueId>("ipl");
   const [name, setName] = useState("");
   const [joinCode, setJoinCode] = useState("");
   const [selectedMode, setSelectedMode] = useState<AuctionMode>("mega");
@@ -78,27 +71,38 @@ export default function HomePage() {
   const [error, setError] = useState("");
   const [recentRooms, setRecentRooms] = useState<RecentRoom[]>([]);
 
+  const leagueConfig = getLeagueConfig(selectedLeague);
+
   useEffect(() => {
     const saved = localStorage.getItem("playerName");
     if (saved) setName(saved);
+    const savedLeague = localStorage.getItem(PREFERRED_LEAGUE_KEY);
+    if (savedLeague) setSelectedLeague(parseLeagueId(savedLeague));
     setRecentRooms(getRecentRooms());
   }, []);
+
+  useEffect(() => {
+    localStorage.setItem(PREFERRED_LEAGUE_KEY, selectedLeague);
+  }, [selectedLeague]);
 
   const handleCreate = useCallback(() => {
     const trimmed = normalizePlayerName(name);
     if (!isValidPlayerName(trimmed)) { setError("Name: 3–20 characters"); return; }
     setLoading(true);
     setError("");
-    getSocket().emit("create-room", { mode: selectedMode, playerName: trimmed }, (res) => {
+    getSocket().emit("create-room", { mode: selectedMode, league: selectedLeague, playerName: trimmed }, (res) => {
       setLoading(false);
       if (res.roomId && res.sessionToken) {
         localStorage.setItem("playerName", trimmed);
         saveSession({ roomId: res.roomId, sessionToken: res.sessionToken, playerName: trimmed });
-        saveRecentRoom({ roomId: res.roomId, teamId: "", playerName: trimmed, mode: selectedMode, joinedAt: Date.now() });
+        saveRecentRoom({
+          roomId: res.roomId, teamId: "", playerName: trimmed,
+          mode: selectedMode, league: selectedLeague, joinedAt: Date.now(),
+        });
         router.push(`/room/${res.roomId}`);
       } else setError(res.error || "Failed");
     });
-  }, [name, selectedMode, router]);
+  }, [name, selectedMode, selectedLeague, router]);
 
   const handleJoin = useCallback(() => {
     const trimmed = normalizePlayerName(name);
@@ -138,14 +142,20 @@ export default function HomePage() {
 
   return (
     <div className="app-shell">
-      <header className="app-header justify-center">
+      <header className="app-header justify-center relative">
+        <Link
+          href="/ai"
+          className="absolute left-3 text-[10px] font-semibold text-ipl-gold/90 hover:text-ipl-gold border border-ipl-gold/30 rounded-lg px-2 py-1"
+        >
+          AI Match Sim
+        </Link>
         <div className="text-center">
           <h1 className="text-xl font-black tracking-tight">
             <span className="bg-gradient-to-r from-ipl-gold via-yellow-300 to-ipl-gold bg-clip-text text-transparent animate-shimmer bg-[length:200%_100%]">
-              IPL 2026 AUCTION
+              {leagueConfig.shortLabel} {leagueConfig.seasonLabel} AUCTION
             </span>
           </h1>
-          <p className="text-[9px] text-gray-500 tracking-[0.25em] uppercase -mt-0.5">539 Players · Live Multiplayer</p>
+          <p className="text-[9px] text-gray-500 tracking-[0.25em] uppercase -mt-0.5">{leagueConfig.tagline}</p>
         </div>
       </header>
 
@@ -161,6 +171,19 @@ export default function HomePage() {
               className="shrink-0 pro-input"
             />
 
+            <div className="shrink-0 flex gap-1 p-1 rounded-2xl bg-ipl-card/50 border border-ipl-border/50">
+              {LEAGUE_TABS.map((tab) => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setSelectedLeague(tab.id)}
+                  className={`action-pill flex-1 text-[11px] ${selectedLeague === tab.id ? "action-pill-active" : "action-pill-inactive"}`}
+                >
+                  <span className="mr-1">{tab.emoji}</span>{tab.label}
+                </button>
+              ))}
+            </div>
+
             <div className="shrink-0 flex gap-1.5 p-1 rounded-2xl bg-ipl-card/50 border border-ipl-border/50">
               <button type="button" onClick={() => setActionTab("create")}
                 className={`action-pill ${actionTab === "create" ? "action-pill-active" : "action-pill-inactive"}`}>
@@ -175,7 +198,7 @@ export default function HomePage() {
             {actionTab === "create" ? (
               <div className="flex-1 min-h-0 flex flex-col gap-2 overflow-y-auto">
                 <p className="shrink-0 text-[10px] text-gray-500 uppercase tracking-wider font-semibold px-1">
-                  Choose auction mode
+                  Choose auction mode · {leagueConfig.teams.length} teams
                 </p>
                 {MODES.map((mode) => (
                   <button
@@ -186,14 +209,14 @@ export default function HomePage() {
                   >
                     <div className={`absolute inset-0 bg-gradient-to-br ${mode.accent} opacity-60 pointer-events-none`} />
                     <div className="relative flex items-start gap-3">
-                      <span className="text-2xl animate-float" style={{ animationDelay: mode.id === "mega" ? "0s" : mode.id === "custom_retention" ? "0.5s" : "1s" }}>
-                        {mode.icon}
-                      </span>
+                      <span className="text-2xl animate-float">{mode.icon}</span>
                       <div className="flex-1 min-w-0">
                         <div className={`font-bold text-sm ${selectedMode === mode.id ? "text-ipl-gold" : "text-white"}`}>
                           {mode.title}
                         </div>
-                        <div className="text-[10px] text-gray-400 mt-0.5 leading-snug">{mode.subtitle}</div>
+                        <div className="text-[10px] text-gray-400 mt-0.5 leading-snug">
+                          {getModeSubtitle(mode.id, selectedLeague)}
+                        </div>
                       </div>
                       <div className={`w-5 h-5 rounded-full border-2 shrink-0 mt-0.5 flex items-center justify-center ${
                         selectedMode === mode.id ? "border-ipl-gold bg-ipl-gold" : "border-ipl-border"
@@ -205,7 +228,7 @@ export default function HomePage() {
                 ))}
                 <button type="button" onClick={handleCreate} disabled={loading}
                   className="shrink-0 w-full py-3.5 mt-auto bid-btn rounded-2xl text-black font-black text-sm disabled:opacity-50">
-                  {loading ? "Creating..." : "Create & Enter Lobby →"}
+                  {loading ? "Creating..." : `Create ${leagueConfig.shortLabel} Room →`}
                 </button>
               </div>
             ) : (
@@ -244,7 +267,8 @@ export default function HomePage() {
               </div>
             ) : (
               recentRooms.map((room) => {
-                const teamDef = room.teamId ? TEAM_MAP[room.teamId] : null;
+                const league = parseLeagueId(room.league);
+                const teamDef = room.teamId ? getTeamMapForLeague(league)[room.teamId] : null;
                 const archive = listRoomArchives().find((a) => a.roomId === room.roomId);
                 const completed = archive ? isCompletedArchive(archive) : false;
                 return (
@@ -255,6 +279,9 @@ export default function HomePage() {
                     className="w-full flex items-center gap-3 p-3.5 rounded-2xl border border-ipl-border/60 bg-ipl-card/50 text-left hover:border-ipl-gold/40 transition"
                   >
                     <span className="font-mono text-base font-bold text-ipl-gold">{room.roomId}</span>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-ipl-purple/30 text-gray-300">
+                      {LEAGUE_LABELS[league]}
+                    </span>
                     {completed && (
                       <span className="text-[10px] px-2 py-0.5 rounded-full bg-green-900/40 text-green-300">Completed</span>
                     )}

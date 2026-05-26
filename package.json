@@ -6,15 +6,17 @@
     "node": ">=20 <23"
   },
   "scripts": {
-    "dev": "npx ts-node --project tsconfig.server.json server.ts",
+    "dev": "npx ts-node -r tsconfig-paths/register --project tsconfig.server.json server.ts",
     "build": "next build",
-    "start": "npx ts-node --project tsconfig.server.json server.ts",
+    "start": "npx ts-node -r tsconfig-paths/register --project tsconfig.server.json server.ts",
     "lint": "next lint",
     "generate-players": "node scripts/generate-players-2026.mjs",
     "fix-players": "node scripts/fix-player-data.mjs",
     "validate-sets": "node scripts/validate-player-sets.mjs",
     "sync-squads": "node scripts/sync-squad-teams-2026.mjs",
-    "download-logos": "node scripts/download-logos.mjs"
+    "download-logos": "node scripts/download-logos.mjs",
+    "generate-league-players": "node scripts/generate-league-players.mjs",
+    "download-league-logos": "node scripts/download-league-logos.mjs"
   },
   "dependencies": {
     "@types/express": "^5.0.0",
@@ -31,6 +33,7 @@
     "lucide-react": "^0.474.0",
     "nanoid": "^5.1.2",
     "next": "^14.2.29",
+    "pdfkit": "^0.18.0",
     "postcss": "^8.5.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
@@ -40,9 +43,11 @@
     "tailwind-merge": "^2.6.0",
     "tailwindcss": "^3.4.17",
     "ts-node": "^10.9.2",
-    "typescript": "^5.7.3"
+    "typescript": "^5.7.3",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@types/canvas-confetti": "^1.9.0"
+    "@types/canvas-confetti": "^1.9.0",
+    "@types/pdfkit": "^0.17.6"
   }
 }

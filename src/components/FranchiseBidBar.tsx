@@ -1,7 +1,7 @@
 "use client";
 
 import { RoomState } from "@/lib/types";
-import { IPL_TEAMS } from "@/data/teams";
+import { getTeamsForLeague } from "@/data/leagueRegistry";
 import TeamLogo from "./TeamLogo";
 
 interface FranchiseBidBarProps {
@@ -15,7 +15,7 @@ export default function FranchiseBidBar({ roomState, currentBidder, myTeamId, co
   return (
     <div className={`w-full shrink-0 ${compact ? "mt-2" : "mt-6 max-w-4xl"}`}>
       <div className="flex gap-1 overflow-x-auto pb-0.5 scrollbar-thin">
-        {IPL_TEAMS.map((def) => {
+        {getTeamsForLeague(roomState.league).map((def) => {
           const team = roomState.teams[def.id];
           const inRoom = !!team;
           const isBidding = currentBidder === def.id;

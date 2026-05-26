@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { RoomState } from "@/lib/types";
-import { formatPrice, TOTAL_PURSE, calculateBidIncrement } from "@/lib/constants";
+import { formatLeaguePrice, getBidIncrementForLeague } from "@/lib/leagueRules";
+import { getLeagueConfig } from "@/data/leagueRegistry";
 import { Socket } from "socket.io-client";
 import { motion, AnimatePresence } from "framer-motion";
 import TeamLogo from "./TeamLogo";
@@ -45,6 +46,8 @@ export default function AuctionPlayerStrip({
   const [bidPending, setBidPending] = useState(false);
   const bidTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const league = roomState.league ?? "ipl";
+  const totalPurse = getLeagueConfig(league).rules.totalPurse;
   const auction = roomState.auction;
   const myTeam = myTeamId ? roomState.teams[myTeamId] : null;
   const currentPlayer = auction.currentPlayer;
@@ -72,10 +75,10 @@ export default function AuctionPlayerStrip({
   const timerPct = (timerSeconds / lotTimer) * 100;
   const displayPrice = auction.currentBidder ? auction.currentBid : (currentPlayer?.basePriceLakhs ?? 0);
   const callout = hammerCall(timerSeconds);
-  const bidIncrement = calculateBidIncrement(displayPrice);
+  const bidIncrement = getBidIncrementForLeague(displayPrice, league);
   const bidLabel = isMyBid
     ? `BID (+${bidIncrement}L)`
-    : bidPending ? "..." : `BID ${formatPrice(nextAmount)}`;
+    : bidPending ? "..." : `BID ${formatLeaguePrice(nextAmount, league)}`;
 
   if (!currentPlayer) {
     return (
@@ -102,7 +105,7 @@ export default function AuctionPlayerStrip({
             </div>
             <h2 className="text-base font-bold text-white truncate">{currentPlayer.name}</h2>
             <div className="flex items-center gap-2 mt-1">
-              <span className="text-xl font-black text-[#22C55E]">{formatPrice(displayPrice)}</span>
+              <span className="text-xl font-black text-[#22C55E]">{formatLeaguePrice(displayPrice, league)}</span>
               {leadingTeam && auction.currentBidder && (
                 <TeamLogo
                   teamId={auction.currentBidder}
@@ -142,8 +145,8 @@ export default function AuctionPlayerStrip({
         <div className="flex items-center gap-2 pt-2 mt-1 border-t border-[#2A2A2A]/60">
           {myTeam && (
             <div className="shrink-0 text-[10px] flex gap-2">
-              <span><span className="text-gray-500">Left: </span><span className="text-[#22C55E] font-bold">{formatPrice(myTeam.purse)}</span></span>
-              <span><span className="text-gray-500">Spent: </span><span className="text-[#FFD700] font-bold">{formatPrice(TOTAL_PURSE - myTeam.purse)}</span></span>
+              <span><span className="text-gray-500">Left: </span><span className="text-[#22C55E] font-bold">{formatLeaguePrice(myTeam.purse, league)}</span></span>
+              <span><span className="text-gray-500">Spent: </span><span className="text-[#FFD700] font-bold">{formatLeaguePrice(totalPurse - myTeam.purse, league)}</span></span>
             </div>
           )}
           {myTeamId && !isSpectator && (
@@ -173,13 +176,14 @@ export function StickyBidBar({
   onBid?: () => void;
 }) {
   const [bidPending, setBidPending] = useState(false);
+  const league = roomState.league ?? "ipl";
   const auction = roomState.auction;
   const myTeam = myTeamId ? roomState.teams[myTeamId] : null;
   const currentPlayer = auction.currentPlayer;
   const isMyBid = auction.currentBidder === myTeamId;
   const nextAmount = auction.currentBidder ? auction.nextBidAmount : (currentPlayer?.basePriceLakhs ?? 0);
   const displayPrice = auction.currentBidder ? auction.currentBid : (currentPlayer?.basePriceLakhs ?? 0);
-  const bidIncrement = calculateBidIncrement(displayPrice);
+  const bidIncrement = getBidIncrementForLeague(displayPrice, league);
 
   const auctionActive = roomState.auction.phase === "auction" && !auction.isPaused;
   const canBid = auctionActive && !isSpectator && myTeam && !myTeam.isVacant && currentPlayer && !isMyBid && !bidPending &&
@@ -211,7 +215,7 @@ export function StickyBidBar({
           ? `BID (+${bidIncrement}L)`
           : bidPending
             ? "RAISING..."
-            : `BID ${formatPrice(nextAmount)}`}
+            : `BID ${formatLeaguePrice(nextAmount, league)}`}
       </button>
     </div>
   );
