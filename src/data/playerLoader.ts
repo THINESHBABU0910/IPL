@@ -4,12 +4,19 @@ import { formatLeaguePrice } from "@/lib/leagueRules";
 import playersRaw from "./players.json";
 import wplPlayersRaw from "./leagues/wpl/players.json";
 import hundredPlayersRaw from "./leagues/hundred/players.json";
+import sa20PlayersRaw from "./leagues/sa20/players.json";
+import bblPlayersRaw from "./leagues/bbl/players.json";
+import wbblPlayersRaw from "./leagues/wbbl/players.json";
 import { RETENTIONS_2026, PURSE_REMAINING_2026 } from "./retentions2026";
+import { filterExcludedCountries } from "@/lib/playerFilter";
 
 const LEAGUE_DATA: Record<LeagueId, PlayersData> = {
   ipl: playersRaw as PlayersData,
   wpl: wplPlayersRaw as PlayersData,
   hundred: hundredPlayersRaw as PlayersData,
+  sa20: sa20PlayersRaw as PlayersData,
+  bbl: bblPlayersRaw as PlayersData,
+  wbbl: wbblPlayersRaw as PlayersData,
 };
 
 function normalizePlayer(p: PlayerJSON, league: LeagueId = "ipl"): Player {
@@ -22,7 +29,7 @@ function normalizePlayer(p: PlayerJSON, league: LeagueId = "ipl"): Player {
 }
 
 function loadLeaguePlayers(league: LeagueId): Player[] {
-  return LEAGUE_DATA[league].players.map((p) => normalizePlayer(p, league));
+  return filterExcludedCountries(LEAGUE_DATA[league].players).map((p) => normalizePlayer(p, league));
 }
 
 const data = playersRaw as PlayersData;

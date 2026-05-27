@@ -25,8 +25,9 @@ interface RoomSettingsTabProps {
 export default function RoomSettingsTab({
   roomState, socket, isHost, roomId, soundOn, onToggleSound,
 }: RoomSettingsTabProps) {
+  const isDraft = roomState.gameType === "draft";
   const timerOptions = [5, 10, 15, 20, 25, 30];
-  const activeTimer = roomState.bidTimerSeconds ?? 15;
+  const activeTimer = isDraft ? (roomState.pickTimerSeconds ?? 15) : (roomState.bidTimerSeconds ?? 15);
 
   function setTimer(seconds: number) {
     if (!isHost) return;
@@ -41,12 +42,14 @@ export default function RoomSettingsTab({
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <span className="text-base">⏱</span>
-            <span className="text-sm font-semibold text-white">Bid Timer</span>
+            <span className="text-sm font-semibold text-white">{isDraft ? "Pick Timer" : "Bid Timer"}</span>
           </div>
           <span className="text-sm font-bold text-[#A855F7]">{activeTimer}s</span>
         </div>
         <p className="text-[10px] text-gray-500">
-          Seconds per lot · +{TIMER_BID_RESET}s after each bid{isHost ? " · Host can change anytime" : ""}
+          {isDraft
+            ? `Seconds per draft pick${isHost ? " · Host can change anytime" : ""}`
+            : `Seconds per lot · +${TIMER_BID_RESET}s after each bid${isHost ? " · Host can change anytime" : ""}`}
         </p>
         <div className="flex gap-1.5 flex-wrap">
           {timerOptions.map((t) => (

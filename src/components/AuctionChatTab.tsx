@@ -13,10 +13,12 @@ interface AuctionChatTabProps {
   socket: Socket;
   disabled?: boolean;
   playerName?: string;
+  /** Tighter layout when chat sits under the draft player list */
+  compact?: boolean;
 }
 
 export default function AuctionChatTab({
-  messages, activityFeed, roomState, socket, disabled, playerName,
+  messages, activityFeed, roomState, socket, disabled, playerName, compact,
 }: AuctionChatTabProps) {
   const [text, setText] = useState("");
   const [localMessages, setLocalMessages] = useState<ChatMessage[]>(messages);
@@ -63,8 +65,8 @@ export default function AuctionChatTab({
   const send = useCallback(() => sendText(text), [text, sendText]);
 
   return (
-    <div className="panel-fill flex flex-col min-h-0 px-2 flex-1">
-      <div ref={scrollRef} className="scroll-panel flex-1 space-y-2 pb-2 min-h-0">
+    <div className={`panel-fill flex flex-col min-h-0 flex-1 ${compact ? "px-2" : "px-2"}`}>
+      <div ref={scrollRef} className={`scroll-panel flex-1 min-h-0 ${compact ? "space-y-1.5 pb-1" : "space-y-2 pb-2"}`}>
         {feed.length === 0 && (
           <p className="text-center text-gray-500 text-xs py-8">Say hello — live bids flash above and fade away</p>
         )}
@@ -97,26 +99,27 @@ export default function AuctionChatTab({
         })}
       </div>
 
-      <div className="shrink-0 flex gap-2 pb-1 pt-1 border-t border-[#2A2A2A]">
-        <GifPicker disabled={disabled} onPick={(url) => sendText(`gif:${url}`)} />
-        <input
-          type="text"
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && send()}
-          placeholder={disabled ? "Chat as spectator..." : "Send a message..."}
-          disabled={disabled}
-          maxLength={200}
-          className="flex-1 bg-[#1A1A1A] border border-[#2A2A2A] rounded-xl px-3 py-2 text-sm text-white placeholder:text-gray-500 disabled:opacity-50"
-        />
-        <button
-          type="button"
-          onClick={send}
-          disabled={disabled || !text.trim()}
-          className="px-3 py-2 rounded-xl bg-[#FFD700] text-black font-bold text-sm disabled:opacity-40"
-        >
-          ➤
-        </button>
+      <div className="shrink-0 pb-1 pt-1 border-t border-[#2A2A2A]">
+        <GifPicker disabled={disabled} onPick={(url) => sendText(`gif:${url}`)}>
+          <input
+            type="text"
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && send()}
+            placeholder={disabled ? "Chat as spectator..." : "Send a message..."}
+            disabled={disabled}
+            maxLength={200}
+            className="flex-1 min-w-0 bg-[#1A1A1A] border border-[#2A2A2A] rounded-xl px-3 py-2 text-sm text-white placeholder:text-gray-500 disabled:opacity-50"
+          />
+          <button
+            type="button"
+            onClick={send}
+            disabled={disabled || !text.trim()}
+            className="shrink-0 px-3 py-2 rounded-xl bg-[#FFD700] text-black font-bold text-sm disabled:opacity-40"
+          >
+            ➤
+          </button>
+        </GifPicker>
       </div>
     </div>
   );

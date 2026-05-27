@@ -89,25 +89,26 @@ export default function ChatPanel({
         })}
         <div ref={bottomRef} />
       </div>
-      <div className="shrink-0 flex gap-2 p-2 border-t border-[#2A2A2A]">
-        <GifPicker disabled={disabled} onPick={sendGif} />
-        <input
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && send()}
-          disabled={disabled}
-          placeholder={disabled ? "Spectators can't chat" : "Say something..."}
-          maxLength={200}
-          className="flex-1 pro-input py-2 text-xs"
-        />
-        <button
-          type="button"
-          onClick={send}
-          disabled={disabled || !text.trim()}
-          className="shrink-0 w-9 h-9 flex items-center justify-center rounded-xl bg-[#A855F7]/30 border border-[#A855F7]/40 text-[#A855F7] disabled:opacity-40"
-        >
-          ➤
-        </button>
+      <div className="shrink-0 p-2 border-t border-[#2A2A2A]">
+        <GifPicker disabled={disabled} onPick={sendGif}>
+          <input
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && send()}
+            disabled={disabled}
+            placeholder={disabled ? "Spectators can't chat" : "Say something..."}
+            maxLength={200}
+            className="flex-1 min-w-0 pro-input py-2 text-xs"
+          />
+          <button
+            type="button"
+            onClick={send}
+            disabled={disabled || !text.trim()}
+            className="shrink-0 w-9 h-9 flex items-center justify-center rounded-xl bg-[#A855F7]/30 border border-[#A855F7]/40 text-[#A855F7] disabled:opacity-40"
+          >
+            ➤
+          </button>
+        </GifPicker>
       </div>
     </div>
   );

@@ -4,7 +4,8 @@ import { useState, useCallback, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { getSocket } from "@/lib/socket";
-import { AuctionMode, LeagueId } from "@/lib/types";
+import { AuctionMode, LeagueId, GameType, DraftGender } from "@/lib/types";
+import { DRAFT_GENDER_TABS, getDraftSubtitle } from "@/lib/draftRules";
 import { getTeamMapForLeague, getLeagueConfig, LEAGUE_TABS, parseLeagueId } from "@/data/leagueRegistry";
 import { getModeSubtitle } from "@/lib/leagueRules";
 import { saveSession, getSessionForRoom } from "@/lib/session";
@@ -17,6 +18,8 @@ interface RecentRoom {
   playerName: string;
   mode: string;
   league?: LeagueId;
+  gameType?: GameType;
+  draftGender?: DraftGender;
   joinedAt: number;
 }
 
@@ -41,6 +44,9 @@ const LEAGUE_LABELS: Record<LeagueId, string> = {
   ipl: "IPL",
   wpl: "WPL",
   hundred: "The Hundred",
+  sa20: "SA20",
+  bbl: "BBL",
+  wbbl: "WBBL",
 };
 
 const PREFERRED_LEAGUE_KEY = "preferredLeague";
@@ -62,8 +68,10 @@ function saveRecentRoom(entry: RecentRoom): void {
 export default function HomePage() {
   const router = useRouter();
   const [screenTab, setScreenTab] = useState<"play" | "recent">("play");
+  const [productTab, setProductTab] = useState<"auction" | "drafts">("auction");
   const [actionTab, setActionTab] = useState<"create" | "join">("create");
   const [selectedLeague, setSelectedLeague] = useState<LeagueId>("ipl");
+  const [draftGender, setDraftGender] = useState<DraftGender>("mens");
   const [name, setName] = useState("");
   const [joinCode, setJoinCode] = useState("");
   const [selectedMode, setSelectedMode] = useState<AuctionMode>("mega");
@@ -90,19 +98,26 @@ export default function HomePage() {
     if (!isValidPlayerName(trimmed)) { setError("Name: 3–20 characters"); return; }
     setLoading(true);
     setError("");
-    getSocket().emit("create-room", { mode: selectedMode, league: selectedLeague, playerName: trimmed }, (res) => {
+    const payload = productTab === "drafts"
+      ? { gameType: "draft" as const, draftGender, playerName: trimmed }
+      : { mode: selectedMode, league: selectedLeague, gameType: "auction" as const, playerName: trimmed };
+    getSocket().emit("create-room", payload, (res) => {
       setLoading(false);
       if (res.roomId && res.sessionToken) {
         localStorage.setItem("playerName", trimmed);
         saveSession({ roomId: res.roomId, sessionToken: res.sessionToken, playerName: trimmed });
         saveRecentRoom({
           roomId: res.roomId, teamId: "", playerName: trimmed,
-          mode: selectedMode, league: selectedLeague, joinedAt: Date.now(),
+          mode: productTab === "drafts" ? "draft" : selectedMode,
+          league: productTab === "drafts" ? (draftGender === "womens" ? "wpl" : "ipl") : selectedLeague,
+          gameType: productTab === "drafts" ? "draft" : "auction",
+          draftGender: productTab === "drafts" ? draftGender : undefined,
+          joinedAt: Date.now(),
         });
         router.push(`/room/${res.roomId}`);
       } else setError(res.error || "Failed");
     });
-  }, [name, selectedMode, selectedLeague, router]);
+  }, [name, selectedMode, selectedLeague, productTab, draftGender, router]);
 
   const handleJoin = useCallback(() => {
     const trimmed = normalizePlayerName(name);
@@ -152,10 +167,12 @@ export default function HomePage() {
         <div className="text-center">
           <h1 className="text-xl font-black tracking-tight">
             <span className="bg-gradient-to-r from-ipl-gold via-yellow-300 to-ipl-gold bg-clip-text text-transparent animate-shimmer bg-[length:200%_100%]">
-              {leagueConfig.shortLabel} {leagueConfig.seasonLabel} AUCTION
+              {productTab === "drafts" ? "SNAKE DRAFT" : `${leagueConfig.shortLabel} ${leagueConfig.seasonLabel} AUCTION`}
             </span>
           </h1>
-          <p className="text-[9px] text-gray-500 tracking-[0.25em] uppercase -mt-0.5">{leagueConfig.tagline}</p>
+          <p className="text-[9px] text-gray-500 tracking-[0.25em] uppercase -mt-0.5">
+            {productTab === "drafts" ? "Custom teams · Search & pick" : leagueConfig.tagline}
+          </p>
         </div>
       </header>
 
@@ -172,6 +189,24 @@ export default function HomePage() {
             />
 
             <div className="shrink-0 flex gap-1 p-1 rounded-2xl bg-ipl-card/50 border border-ipl-border/50">
+              <button
+                type="button"
+                onClick={() => setProductTab("auction")}
+                className={`action-pill flex-1 text-[11px] ${productTab === "auction" ? "action-pill-active" : "action-pill-inactive"}`}
+              >
+                Auction
+              </button>
+              <button
+                type="button"
+                onClick={() => setProductTab("drafts")}
+                className={`action-pill flex-1 text-[11px] ${productTab === "drafts" ? "action-pill-active" : "action-pill-inactive"}`}
+              >
+                Drafts
+              </button>
+            </div>
+
+            {productTab === "auction" ? (
+            <div className="shrink-0 flex gap-1 p-1 rounded-2xl bg-ipl-card/50 border border-ipl-border/50">
               {LEAGUE_TABS.map((tab) => (
                 <button
                   key={tab.id}
@@ -183,6 +218,20 @@ export default function HomePage() {
                 </button>
               ))}
             </div>
+            ) : (
+            <div className="shrink-0 flex gap-1 p-1 rounded-2xl bg-ipl-card/50 border border-ipl-border/50">
+              {DRAFT_GENDER_TABS.map((tab) => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setDraftGender(tab.id)}
+                  className={`action-pill flex-1 text-[11px] ${draftGender === tab.id ? "action-pill-active" : "action-pill-inactive"}`}
+                >
+                  <span className="mr-1">{tab.emoji}</span>{tab.label}
+                </button>
+              ))}
+            </div>
+            )}
 
             <div className="shrink-0 flex gap-1.5 p-1 rounded-2xl bg-ipl-card/50 border border-ipl-border/50">
               <button type="button" onClick={() => setActionTab("create")}
@@ -197,6 +246,8 @@ export default function HomePage() {
 
             {actionTab === "create" ? (
               <div className="flex-1 min-h-0 flex flex-col gap-2 overflow-y-auto">
+                {productTab === "auction" ? (
+                <>
                 <p className="shrink-0 text-[10px] text-gray-500 uppercase tracking-wider font-semibold px-1">
                   Choose auction mode · {leagueConfig.teams.length} teams
                 </p>
@@ -230,6 +281,30 @@ export default function HomePage() {
                   className="shrink-0 w-full py-3.5 mt-auto bid-btn rounded-2xl text-black font-black text-sm disabled:opacity-50">
                   {loading ? "Creating..." : `Create ${leagueConfig.shortLabel} Room →`}
                 </button>
+                </>
+                ) : (
+                <>
+                <p className="shrink-0 text-[10px] text-gray-500 uppercase tracking-wider font-semibold px-1">
+                  Snake draft · custom teams · 18–25 squad
+                </p>
+                <div className="ref-card shrink-0 p-4">
+                  <div className="text-2xl mb-2">🐍</div>
+                  <div className="font-bold text-ipl-gold text-sm">Multiplayer Snake Draft</div>
+                  <p className="text-[11px] text-gray-400 mt-2 leading-relaxed">
+                    {getDraftSubtitle(draftGender)}
+                  </p>
+                  <ul className="text-[10px] text-gray-500 mt-3 space-y-1 list-disc list-inside">
+                    <li>10 fantasy team slots — rename, recolor, emoji logos</li>
+                    <li>No overseas cap · no auction prices</li>
+                    <li>Re-shuffled snake order each cycle</li>
+                  </ul>
+                </div>
+                <button type="button" onClick={handleCreate} disabled={loading}
+                  className="shrink-0 w-full py-3.5 mt-auto bid-btn rounded-2xl text-black font-black text-sm disabled:opacity-50">
+                  {loading ? "Creating..." : `Create ${draftGender === "womens" ? "Womens" : "Mens"} Draft →`}
+                </button>
+                </>
+                )}
               </div>
             ) : (
               <div className="flex-1 min-h-0 flex flex-col gap-3 justify-center">
@@ -279,9 +354,15 @@ export default function HomePage() {
                     className="w-full flex items-center gap-3 p-3.5 rounded-2xl border border-ipl-border/60 bg-ipl-card/50 text-left hover:border-ipl-gold/40 transition"
                   >
                     <span className="font-mono text-base font-bold text-ipl-gold">{room.roomId}</span>
+                    {room.gameType === "draft" ? (
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-900/40 text-emerald-300">
+                        Draft {room.draftGender === "womens" ? "Womens" : "Mens"}
+                      </span>
+                    ) : (
                     <span className="text-[10px] px-2 py-0.5 rounded-full bg-ipl-purple/30 text-gray-300">
                       {LEAGUE_LABELS[league]}
                     </span>
+                    )}
                     {completed && (
                       <span className="text-[10px] px-2 py-0.5 rounded-full bg-green-900/40 text-green-300">Completed</span>
                     )}

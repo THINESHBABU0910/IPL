@@ -14,6 +14,17 @@ export function getTeamSoldPrices(teamId: string, roomState: RoomState): Record<
   const team = roomState.teams[teamId];
   if (!team) return {};
   const prices: Record<string, number> = {};
+
+  if (roomState.gameType === "draft") {
+    for (const pick of roomState.draft?.picks ?? []) {
+      if (pick.teamId === teamId) prices[pick.player.id] = 0;
+    }
+    for (const p of team.squad) {
+      if (!(p.id in prices)) prices[p.id] = 0;
+    }
+    return prices;
+  }
+
   for (const sale of roomState.auction.soldPlayers) {
     if (sale.teamId === teamId) prices[sale.player.id] = sale.price;
   }
@@ -24,7 +35,16 @@ export function getTeamSoldPrices(teamId: string, roomState: RoomState): Record<
 }
 
 export function getSortedTeamIds(roomState: RoomState, myTeamId: string | null): string[] {
-  const ids = getTeamsForLeague(roomState.league).map((t) => t.id).filter((id) => roomState.teams[id]);
+  const ids =
+    roomState.gameType === "draft"
+      ? (roomState.draftTeamSlots?.map((s) => s.id) ??
+        Object.keys(roomState.teams).filter((id) => roomState.teams[id]))
+          .filter((id) => {
+            const t = roomState.teams[id];
+            return t && (t.squad.length > 0 || (!!t.ownerId && !t.isVacant));
+          })
+      : getTeamsForLeague(roomState.league).map((t) => t.id).filter((id) => roomState.teams[id]);
+
   return ids.sort((a, b) => {
     if (a === myTeamId) return -1;
     if (b === myTeamId) return 1;
@@ -44,6 +64,7 @@ export function getTeamPlayers(teamId: string, roomState: RoomState): Player[] {
 export function getTeamSpent(teamId: string, roomState: RoomState): number {
   const team = roomState.teams[teamId];
   if (!team) return 0;
+  if (roomState.gameType === "draft") return 0;
   return getLeagueConfig(roomState.league).rules.totalPurse - team.purse;
 }
 

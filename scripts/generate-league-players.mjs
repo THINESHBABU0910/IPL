@@ -80,7 +80,7 @@ const WPL_PLAYERS = [
   mk("WP030", "Heather Knight", "England", "ALL-ROUNDER", "AL2", "WRCB", { league: "wpl", age: 34 }),
   mk("WP031", "Alice Capsey", "England", "ALL-ROUNDER", "AL2", "WDC", { league: "wpl", age: 20 }),
   mk("WP032", "Shikha Pandey", "India", "ALL-ROUNDER", "AL2", "GG", { league: "wpl", age: 35 }),
-  mk("WP033", "Diana Baig", "Pakistan", "ALL-ROUNDER", "AL3", "UPW", { league: "wpl", age: 28 }),
+  mk("WP033", "Marizanne Kapp", "South Africa", "ALL-ROUNDER", "AL3", "UPW", { league: "wpl", age: 35 }),
   mk("WP034", "Natalie Sciver-Brunt", "England", "ALL-ROUNDER", "AL3", "WMI", { league: "wpl" }),
   mk("WP035", "Taniya Bhatia", "India", "WICKETKEEPER", "AL3", "WDC", { league: "wpl", age: 26 }),
   // Wicketkeepers
@@ -156,8 +156,8 @@ const WPL_EXTRA = [
   ["WP098", "Shemaine Campbelle", "West Indies", "WICKETKEEPER", "WK2", "UPW"],
   ["WP099", "Shakera Selman", "West Indies", "BOWLER", "FA3", "WDC"],
   ["WP100", "Chinelle Henry", "West Indies", "ALL-ROUNDER", "AL3", "WRCB"],
-  ["WP101", "Nida Dar", "Pakistan", "ALL-ROUNDER", "AL2", "GG"],
-  ["WP102", "Fatima Sana", "Pakistan", "ALL-ROUNDER", "AL3", "UPW"],
+  ["WP101", "Amelia Kerr", "New Zealand", "ALL-ROUNDER", "AL2", "GG"],
+  ["WP102", "Lea Tahuhu", "New Zealand", "BOWLER", "FA3", "UPW"],
   ["WP103", "Gaby Lewis", "Ireland", "ALL-ROUNDER", "AL3", "WDC"],
   ["WP104", "Orla Prendergast", "Ireland", "ALL-ROUNDER", "AL3", "WRCB"],
   ["WP105", "Leah Paul", "Ireland", "ALL-ROUNDER", "AL3", "WMI"],
@@ -194,7 +194,7 @@ const HUNDRED_SQUADS = {
   OVI: ["Sam Curran", "Tom Curran", "Will Jacks", "Jordan Cox", "Rashid Khan", "Danny Briggs", "Nathan Sowter", "Rory Burns", "Donovan Ferreira", "Topley"],
   SOB: ["James Vince", "Chris Jordan", "Jofra Archer", "Tymal Mills", "Mahela Jayawardene", "Leus du Plooy", "Craig Overton", "Jack Lintott", "George Garton", "Kyle Jamieson"],
   TRT: ["Joe Root", "Rashid Khan", "David Warner", "Lewis Gregory", "Samit Patel", "Luke Wood", "Tom Kohler-Cadmore", "Sean Abbott", "Dawson", "Ferguson"],
-  WEF: ["Tom Banton", "David Miller", "Glenn Phillips", "Naseem Shah", "Shamar Joseph", "Luke Fletcher", "Dan Douthwaite", "Ferguson", "Wright", "Hain"],
+  WEF: ["Tom Banton", "David Miller", "Glenn Phillips", "Shamar Joseph", "Luke Fletcher", "Dan Douthwaite", "Ferguson", "Wright", "Hain", "Jamie Overton"],
 };
 
 const HUNDRED_PLAYERS = [];
@@ -231,7 +231,7 @@ const HUNDRED_MARQUEE = [
   ["Lockie Ferguson", "New Zealand", "BOWLER", "MNR"],
   ["Glenn Phillips", "New Zealand", "ALL-ROUNDER", "WEF"],
   ["David Miller", "South Africa", "BATTER", "WEF"],
-  ["Naseem Shah", "Pakistan", "BOWLER", "WEF"],
+  ["Jamie Overton", "England", "ALL-ROUNDER", "WEF"],
   ["Daryl Mitchell", "New Zealand", "ALL-ROUNDER", "LNS"],
   ["Ben Duckett", "England", "BATTER", "BPH"],
 ];
@@ -299,6 +299,202 @@ function writePool(dir, filename, players) {
   console.log(`✓ ${filename}: ${players.length} players`);
 }
 
+function buildLeaguePool(prefix, leagueKey, teams, marquee, squads, extras, targetCount) {
+  const players = [];
+  let idx = 1;
+  const seen = new Set();
+
+  function add(name, country, role, set, team, opts = {}) {
+    if (seen.has(name)) return;
+    seen.add(name);
+    players.push(mk(
+      `${prefix}${String(idx++).padStart(3, "0")}`,
+      name,
+      country,
+      role,
+      set,
+      team,
+      { league: leagueKey, ...opts },
+    ));
+  }
+
+  for (const [name, country, role, team] of marquee) {
+    add(name, country, role, "M1", team);
+  }
+
+  for (const [teamId, names] of Object.entries(squads)) {
+    for (const name of names) {
+      if (seen.has(name)) continue;
+      add(name, "Australia", "ALL-ROUNDER", "BA2", teamId);
+    }
+  }
+
+  for (const [name, country, role, team] of extras) {
+    add(name, country, role, "AL2", team);
+  }
+
+  const sets = ["BA3", "FA3", "SP2", "UBA1", "UAL1", "UWK1"];
+  while (players.length < targetCount) {
+    const team = teams[players.length % teams.length];
+    const set = sets[players.length % sets.length];
+    add(
+      `${leagueKey.toUpperCase()} Pool ${players.length + 1}`,
+      leagueKey === "sa20" ? "South Africa" : "Australia",
+      ["BATTER", "BOWLER", "ALL-ROUNDER", "WICKETKEEPER"][players.length % 4],
+      set,
+      team,
+      { isCapped: !set.startsWith("U"), age: 22 + (players.length % 10) },
+    );
+  }
+
+  return players;
+}
+
+// ─── SA20 2025 pool ───
+const SA20_TEAMS = ["JSK", "SEC", "MICT", "DSG", "PR", "PC"];
+const SA20_MARQUEE = [
+  ["Rashid Khan", "Afghanistan", "BOWLER", "MICT"],
+  ["Kagiso Rabada", "South Africa", "BOWLER", "MICT"],
+  ["Quinton de Kock", "South Africa", "WICKETKEEPER", "DSG"],
+  ["David Miller", "South Africa", "BATTER", "JSK"],
+  ["Marco Jansen", "South Africa", "ALL-ROUNDER", "SEC"],
+  ["Tristan Stubbs", "South Africa", "BATTER", "SEC"],
+  ["Dewald Brevis", "South Africa", "BATTER", "MICT"],
+  ["Anrich Nortje", "South Africa", "BOWLER", "PR"],
+  ["Aiden Markram", "South Africa", "ALL-ROUNDER", "SEC"],
+  ["Heinrich Klaasen", "South Africa", "WICKETKEEPER", "SEC"],
+  ["Lungi Ngidi", "South Africa", "BOWLER", "DSG"],
+  ["Ryan Rickelton", "South Africa", "WICKETKEEPER", "JSK"],
+  ["Rassie van der Dussen", "South Africa", "BATTER", "PR"],
+  ["Adam Zampa", "Australia", "BOWLER", "PR"],
+  ["Jason Roy", "England", "BATTER", "PC"],
+  ["Faf du Plessis", "South Africa", "BATTER", "JSK"],
+  ["Will Jacks", "England", "ALL-ROUNDER", "MICT"],
+  ["Sam Curran", "England", "ALL-ROUNDER", "PR"],
+  ["Chris Morris", "South Africa", "ALL-ROUNDER", "PC"],
+  ["Kyle Verreynne", "South Africa", "WICKETKEEPER", "PC"],
+];
+const SA20_SQUADS = {
+  JSK: ["Faf du Plessis", "David Miller", "Ryan Rickelton", "George Linde", "Moeen Ali", "Leus du Plooy", "Nandre Burger", "Kyle Simmonds", "Mitchell van Buuren", "Lutho Sipamla"],
+  SEC: ["Aiden Markram", "Heinrich Klaasen", "Marco Jansen", "Tristan Stubbs", "Adam Rossington", "Tom Curran", "Craig Overton", "Ottis Gibson", "Daniel Worrall", "Patrick Kruger"],
+  MICT: ["Rashid Khan", "Kagiso Rabada", "Dewald Brevis", "Will Jacks", "Ben Stokes", "Tim David", "George Linde", "Olly Stone", "Duan Jansen", "Kyle Verreynne"],
+  DSG: ["Quinton de Kock", "Lungi Ngidi", "Jon-Jon Smuts", "Wiaan Mulder", "Matthew Breetzke", "Naveen-ul-Haq", "Jason Holder", "Prenelan Subrayen", "Chris McKenzie", "Junior Dala"],
+  PR: ["Anrich Nortje", "Rassie van der Dussen", "Adam Zampa", "Sam Curran", "David Wiese", "Evan Jones", "Bjorn Fortuin", "Mitchell Owen", "Leroy Modiselle", "Eoin Lewis"],
+  PC: ["Jason Roy", "Chris Morris", "Kyle Verreynne", "Wayne Parnell", "Will Jacks", "Cameron Delport", "Senuran Muthusamy", "Eathan Bosch", "Joshua Little", "Shane Dadswell"],
+};
+const SA20_EXTRA = [
+  ["Ben Stokes", "England", "ALL-ROUNDER", "MICT"],
+  ["Tim David", "Australia", "BATTER", "MICT"],
+  ["Jason Holder", "West Indies", "ALL-ROUNDER", "DSG"],
+  ["Naveen-ul-Haq", "Afghanistan", "BOWLER", "DSG"],
+  ["Moeen Ali", "England", "ALL-ROUNDER", "JSK"],
+  ["George Linde", "South Africa", "ALL-ROUNDER", "JSK"],
+  ["Tom Curran", "England", "ALL-ROUNDER", "SEC"],
+  ["David Wiese", "South Africa", "ALL-ROUNDER", "PR"],
+  ["Wayne Parnell", "South Africa", "BOWLER", "PC"],
+  ["Leus du Plooy", "South Africa", "BATTER", "JSK"],
+];
+const SA20_PLAYERS = buildLeaguePool("SP", "sa20", SA20_TEAMS, SA20_MARQUEE, SA20_SQUADS, SA20_EXTRA, 120);
+
+// ─── BBL 2025 pool ───
+const BBL_TEAMS = ["BH", "HH", "MS", "PS", "SS", "AS", "MR", "ST"];
+const BBL_MARQUEE = [
+  ["Travis Head", "Australia", "BATTER", "AS"],
+  ["Steve Smith", "Australia", "BATTER", "SS"],
+  ["Glenn Maxwell", "Australia", "ALL-ROUNDER", "MS"],
+  ["Mitchell Starc", "Australia", "BOWLER", "SS"],
+  ["Josh Inglis", "Australia", "WICKETKEEPER", "PS"],
+  ["Matthew Wade", "Australia", "WICKETKEEPER", "HH"],
+  ["Marcus Stoinis", "Australia", "ALL-ROUNDER", "PS"],
+  ["Aaron Finch", "Australia", "BATTER", "ST"],
+  ["David Warner", "Australia", "BATTER", "SS"],
+  ["Pat Cummins", "Australia", "BOWLER", "SS"],
+  ["Mitchell Marsh", "Australia", "ALL-ROUNDER", "PS"],
+  ["Adam Zampa", "Australia", "BOWLER", "MR"],
+  ["Chris Lynn", "Australia", "BATTER", "MR"],
+  ["Kane Richardson", "Australia", "BOWLER", "AS"],
+  ["Jhye Richardson", "Australia", "BOWLER", "PS"],
+  ["Sean Abbott", "Australia", "ALL-ROUNDER", "SS"],
+  ["Ashton Agar", "Australia", "ALL-ROUNDER", "PS"],
+  ["Tim David", "Australia", "BATTER", "HH"],
+  ["Nathan Ellis", "Australia", "BOWLER", "HH"],
+  ["Will Jacks", "England", "ALL-ROUNDER", "MR"],
+];
+const BBL_SQUADS = {
+  BH: ["Travis Head", "Sam Heazlett", "Michael Neser", "Xavier Bartlett", "Spencer Johnson", "Jimmy Peirson", "Matt Renshaw", "Tom Banton", "Mark Steketee", "Lachie Pfeffer"],
+  HH: ["Matthew Wade", "Tim David", "Nathan Ellis", "Riley Meredith", "Caleb Jewell", "Macalister Wright", "Nathan McAndrew", "Peter Siddle", "Chris Jordan", "Colin Ackermann"],
+  MS: ["Glenn Maxwell", "Marcus Stoinis", "Adam Zampa", "Hilton Cartwright", "Brody Couch", "Joel Davies", "Tom Rogers", "Dan Lawrence", "Mark Steketee", "Beau Webster"],
+  PS: ["Josh Inglis", "Mitchell Marsh", "Marcus Stoinis", "Ashton Agar", "Jhye Richardson", "Jason Behrendorff", "Ashton Turner", "Cooper Connolly", "Lance Morris", "Nick Hobson"],
+  SS: ["Steve Smith", "David Warner", "Mitchell Starc", "Pat Cummins", "Sean Abbott", "Moises Henriques", "James Vince", "Ben Dwarshuis", "Jackson Bird", "Hayden Kerr"],
+  AS: ["Travis Head", "Kane Richardson", "Alex Carey", "Jon Wells", "Henry Thornton", "Matt Renshaw", "Dwayne Bravo", "Harry Conway", "Ben Manenti", "Jamie Overton"],
+  MR: ["Will Jacks", "Adam Zampa", "Chris Lynn", "Aaron Finch", "Andre Russell", "Tom Rogers", "Mujeeb Ur Rahman", "Zak Evans", "Will Sutherland", "Sam Harper"],
+  ST: ["Aaron Finch", "Chris Green", "Daniel Sams", "Chris Jordan", "Jason Sangha", "Baxter Holt", "Nathan McAndrew", "Tanveer Sangha", "Chris Tremain", "Matthew Gilkes"],
+};
+const BBL_EXTRA = [
+  ["Alex Carey", "Australia", "WICKETKEEPER", "AS"],
+  ["Moises Henriques", "Australia", "ALL-ROUNDER", "SS"],
+  ["James Vince", "England", "BATTER", "SS"],
+  ["Andre Russell", "West Indies", "ALL-ROUNDER", "MR"],
+  ["Mujeeb Ur Rahman", "Afghanistan", "BOWLER", "MR"],
+  ["Chris Jordan", "England", "BOWLER", "HH"],
+  ["Dan Lawrence", "England", "BATTER", "MS"],
+  ["Tom Banton", "England", "BATTER", "BH"],
+  ["Chris Green", "Australia", "ALL-ROUNDER", "ST"],
+  ["Tanveer Sangha", "Australia", "BOWLER", "ST"],
+];
+const BBL_PLAYERS = buildLeaguePool("BP", "bbl", BBL_TEAMS, BBL_MARQUEE, BBL_SQUADS, BBL_EXTRA, 150);
+
+// ─── WBBL 2025 pool ───
+const WBBL_TEAMS = ["BH-W", "HH-W", "MS-W", "PS-W", "SS-W", "AS-W", "MR-W", "ST-W"];
+const WBBL_MARQUEE = [
+  ["Alyssa Healy", "Australia", "WICKETKEEPER", "SS-W"],
+  ["Meg Lanning", "Australia", "BATTER", "PS-W"],
+  ["Ellyse Perry", "Australia", "ALL-ROUNDER", "SS-W"],
+  ["Beth Mooney", "Australia", "WICKETKEEPER", "PS-W"],
+  ["Ash Gardner", "Australia", "ALL-ROUNDER", "MR-W"],
+  ["Sophie Ecclestone", "England", "BOWLER", "MS-W"],
+  ["Nat Sciver-Brunt", "England", "ALL-ROUNDER", "SS-W"],
+  ["Smriti Mandhana", "India", "BATTER", "AS-W"],
+  ["Hayley Matthews", "West Indies", "ALL-ROUNDER", "HH-W"],
+  ["Amelia Kerr", "New Zealand", "ALL-ROUNDER", "BH-W"],
+  ["Tahlia McGrath", "Australia", "ALL-ROUNDER", "AS-W"],
+  ["Phoebe Litchfield", "Australia", "BATTER", "HH-W"],
+  ["Annabel Sutherland", "Australia", "ALL-ROUNDER", "MR-W"],
+  ["Georgia Wareham", "Australia", "ALL-ROUNDER", "ST-W"],
+  ["Marizanne Kapp", "South Africa", "ALL-ROUNDER", "PS-W"],
+  ["Laura Wolvaardt", "South Africa", "BATTER", "PS-W"],
+  ["Heather Knight", "England", "ALL-ROUNDER", "BH-W"],
+  ["Deepti Sharma", "India", "ALL-ROUNDER", "MR-W"],
+  ["Richa Ghosh", "India", "WICKETKEEPER", "AS-W"],
+  ["Grace Harris", "Australia", "ALL-ROUNDER", "BH-W"],
+];
+const WBBL_SQUADS = {
+  "BH-W": ["Amelia Kerr", "Heather Knight", "Grace Harris", "Jess Jonassen", "Charlotte Coe", "Nikola Carey", "Laura Harris", "Molly Strano", "Georgia Redmayne", "Anneke Bosch"],
+  "HH-W": ["Hayley Matthews", "Phoebe Litchfield", "Nicola Carey", "Heather Graham", "Molly Strano", "Rachel Haynes", "Elyse Villani", "Amy Smith", "Maitlan Brown", "Chloe Pipar"],
+  "MS-W": ["Sophie Ecclestone", "Meg Lanning", "Annabel Sutherland", "Kim Garth", "Alice Capsey", "Erin Burns", "Nicola Hancock", "Paris Cotter", "Olivia Davies", "Lucy Hamilton"],
+  "PS-W": ["Meg Lanning", "Beth Mooney", "Marizanne Kapp", "Laura Wolvaardt", "Sophie Devine", "Amy Edgar", "Chloe Pipar", "Alana King", "Lilly Mills", "Taneale Peschel"],
+  "SS-W": ["Alyssa Healy", "Ellyse Perry", "Nat Sciver-Brunt", "Ashleigh Gardner", "Erin Burns", "Kate Porter", "Lauren Cheatle", "Hayley Silver-Holmes", "Maitlan Brown", "Kate Porter"],
+  "AS-W": ["Smriti Mandhana", "Tahlia McGrath", "Richa Ghosh", "Darcie Brown", "Bridget Patterson", "Amanda-Jade Wellington", "Annie O'Neil", "Ella Wilson", "Megan Schutt", "Madeline Penna"],
+  "MR-W": ["Ash Gardner", "Annabel Sutherland", "Deepti Sharma", "Hayley Matthews", "Tammy Beaumont", "Erica Gibson", "Georgia Wareham", "Carly Leeson", "Nicola Hancock", "Emma Manix-Geeves"],
+  "ST-W": ["Georgia Wareham", "Heather Graham", "Sammy-Jo Johnson", "Hannah Darlington", "Anika Learoyd", "Elyse Villani", "Lauren Cheatle", "Kate Porter", "Olivia Davies", "Phoebe Litchfield"],
+};
+const WBBL_EXTRA = [
+  ["Sophie Devine", "New Zealand", "ALL-ROUNDER", "PS-W"],
+  ["Jess Jonassen", "Australia", "BOWLER", "BH-W"],
+  ["Megan Schutt", "Australia", "BOWLER", "AS-W"],
+  ["Amanda-Jade Wellington", "Australia", "BOWLER", "AS-W"],
+  ["Kim Garth", "Ireland", "ALL-ROUNDER", "MS-W"],
+  ["Alice Capsey", "England", "ALL-ROUNDER", "MS-W"],
+  ["Tammy Beaumont", "England", "WICKETKEEPER", "MR-W"],
+  ["Elyse Villani", "Australia", "BATTER", "HH-W"],
+  ["Lauren Cheatle", "Australia", "BOWLER", "SS-W"],
+  ["Darcie Brown", "Australia", "BOWLER", "AS-W"],
+];
+const WBBL_PLAYERS = buildLeaguePool("WB", "wbbl", WBBL_TEAMS, WBBL_MARQUEE, WBBL_SQUADS, WBBL_EXTRA, 120);
+
 writePool(join(DATA, "leagues", "wpl"), "players.json", WPL_PLAYERS);
 writePool(join(DATA, "leagues", "hundred"), "players.json", HUNDRED_PLAYERS);
+writePool(join(DATA, "leagues", "sa20"), "players.json", SA20_PLAYERS);
+writePool(join(DATA, "leagues", "bbl"), "players.json", BBL_PLAYERS);
+writePool(join(DATA, "leagues", "wbbl"), "players.json", WBBL_PLAYERS);
 console.log("\nDone.");

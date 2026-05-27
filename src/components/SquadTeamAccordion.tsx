@@ -4,6 +4,7 @@ import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { RoomState } from "@/lib/types";
 import { formatPrice, MAX_OVERSEAS, MAX_SQUAD_SIZE } from "@/lib/constants";
+import { DRAFT_SQUAD_MAX } from "@/lib/draftRules";
 import TeamLogo from "./TeamLogo";
 import {
   getTeamSoldPrices, getSortedTeamIds, getTeamPlayers, getTeamSpent,
@@ -24,7 +25,9 @@ interface SquadTeamAccordionProps {
 export default function SquadTeamAccordion({
   roomState, myTeamId, playerName, isHost, defaultExpandedId, showActions = false,
 }: SquadTeamAccordionProps) {
+  const isDraft = roomState.gameType === "draft";
   const teamIds = getSortedTeamIds(roomState, myTeamId);
+  const maxSquad = isDraft ? DRAFT_SQUAD_MAX : MAX_SQUAD_SIZE;
   const defaultId = defaultExpandedId
     ?? myTeamId
     ?? teamIds.find((id) => getTeamPlayers(id, roomState).length > 0)
@@ -144,10 +147,17 @@ export default function SquadTeamAccordion({
                 >
                   <div className="p-3 pt-2 space-y-3">
                     <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px]">
-                      <span className="text-gray-400">OS: <span className="text-white font-bold">{overseas}/{MAX_OVERSEAS}</span></span>
-                      <span className="text-gray-400">Purse: <span className="text-[#22C55E] font-bold">{formatPrice(team.purse)}</span></span>
-                      <span className="text-gray-400">Spent: <span className="text-[#FFD700] font-bold">{formatPrice(spent)}</span></span>
-                      <span className="text-gray-400">Squad: <span className="text-white font-bold">{allPlayers.length}/{MAX_SQUAD_SIZE}</span></span>
+                      {!isDraft && (
+                        <>
+                          <span className="text-gray-400">OS: <span className="text-white font-bold">{overseas}/{MAX_OVERSEAS}</span></span>
+                          <span className="text-gray-400">Purse: <span className="text-[#22C55E] font-bold">{formatPrice(team.purse)}</span></span>
+                          <span className="text-gray-400">Spent: <span className="text-[#FFD700] font-bold">{formatPrice(spent)}</span></span>
+                        </>
+                      )}
+                      {isDraft && overseas > 0 && (
+                        <span className="text-gray-400">OS: <span className="text-white font-bold">{overseas}</span></span>
+                      )}
+                      <span className="text-gray-400">Squad: <span className="text-white font-bold">{allPlayers.length}/{maxSquad}</span></span>
                     </div>
 
                     {grouped.map(({ role, label, players }) => (
@@ -159,11 +169,14 @@ export default function SquadTeamAccordion({
                           {players.map((p) => {
                             const isRetained = retainedIds.has(p.id);
                             const price = soldPrices[p.id];
+                            const priceLabel = isDraft
+                              ? "Drafted"
+                              : (price != null && price > 0 ? formatPrice(price) : p.displayPrice);
                             return (
                               <PlayerRow
                                 key={p.id}
                                 name={p.name}
-                                price={price != null ? formatPrice(price) : p.displayPrice}
+                                price={priceLabel}
                                 overseas={p.isOverseas}
                                 retained={isRetained}
                               />

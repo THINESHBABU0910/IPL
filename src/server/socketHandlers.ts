@@ -8,9 +8,15 @@ import {
   serializeRoom, isHost, addActivity, addChat,
   generateSessionToken, resetRoomForRematch, reconnectByToken,
   pushAuctionActivity, normalizeRetentionPlayerIds,
-  allTeamsJoined, canStartAuction, claimOpenTeam, addTeamMidGame,
+  allTeamsJoined, canStartAuction, canStartDraft, claimOpenTeam, addTeamMidGame,
   kickTeamOwner, releaseOfflinePlayerSlot,
+  claimDraftTeamSlot, releaseDraftTeamSlot, editDraftTeamSlot, addDraftTeamSlot,
 } from "./gameState";
+import {
+  createInitialDraftState, processDraftPick, onDraftTimerExpired,
+  resetDraftTimer, checkDraftComplete, forceEndDraft, skipDraftPick,
+  getCurrentPickerTeamName,
+} from "./draftEngine";
 import type { Room } from "./gameState";
 import {
   presentNextPlayer, processBid, sellPlayer, markUnsold,
@@ -38,7 +44,9 @@ function buildRuntimeState(room: Room): RuntimeStatePayload {
   let status: RuntimeStatePayload["status"] = "LOBBY";
   if (phase === "retention") status = "RETENTION";
   else if (phase === "completed") status = "COMPLETED";
-  else if (phase === "auction") status = room.auction.isPaused ? "PAUSED" : "AUCTION";
+  else if (phase === "draft" || phase === "catchup") {
+    status = room.draft?.isPaused ? "PAUSED" : "AUCTION";
+  } else if (phase === "auction") status = room.auction.isPaused ? "PAUSED" : "AUCTION";
 
   const teams: RuntimeStatePayload["teams"] = {};
   for (const [id, team] of room.teams) {
@@ -53,9 +61,9 @@ function buildRuntimeState(room: Room): RuntimeStatePayload {
     status,
     mode: room.mode,
     currentSet: room.auction.currentSetName,
-    timer: room.auction.timerSeconds,
-    timerEndsAt: room.auction.timerEndsAt,
-    poolRemaining: getRemainingCount(room),
+    timer: room.draft?.timerSeconds ?? room.auction.timerSeconds,
+    timerEndsAt: room.draft?.timerEndsAt ?? room.auction.timerEndsAt,
+    poolRemaining: room.draft?.availablePlayerIds.length ?? getRemainingCount(room),
     soldCount: room.auction.soldPlayers.length,
     unsoldCount: room.auction.unsoldPlayers.length,
     round: room.auction.round,
@@ -87,6 +95,15 @@ function broadcastState(io: IOServer, room: Room): void {
 }
 
 function tryStartGame(io: IOServer, room: Room, byHost: boolean, socket?: IOSocket): boolean {
+  if (room.gameType === "draft") {
+    const check = canStartDraft(room, byHost);
+    if (!check.ok) {
+      socket?.emit("error", { message: check.reason || "Cannot start yet" });
+      return false;
+    }
+    startDraft(io, room);
+    return true;
+  }
   const check = canStartAuction(room, byHost);
   if (!check.ok) {
     socket?.emit("error", { message: check.reason || "Cannot start yet" });
@@ -161,7 +178,16 @@ export function registerHandlers(io: IOServer): void {
       }
       let roomId = generateRoomCodeUtil();
       while (getRoom(roomId)) roomId = generateRoomCodeUtil();
-      const room = createRoom(roomId, data.mode, socket.id, playerName, parseLeagueId(data.league));
+      const gameType = data.gameType === "draft" ? "draft" : "auction";
+      const room = createRoom(
+        roomId,
+        data.mode || "mega",
+        socket.id,
+        playerName,
+        parseLeagueId(data.league),
+        gameType,
+        data.draftGender,
+      );
       currentRoomId = room.id;
       socket.join(room.id);
       const token = room.sessionTokens.get(socket.id)!;
@@ -210,9 +236,16 @@ export function registerHandlers(io: IOServer): void {
       }
       releaseOfflineName(room, io, playerName);
 
-      if (!midGame && room.teams.size + room.spectators.size >= 10 && !data.spectator) {
-        callback({ success: false, error: "Room is full" });
-        return;
+      if (!midGame && !data.spectator) {
+        if (room.gameType === "draft") {
+          const hasOpen = room.draftTeamSlots?.some((s) => !s.ownerId) ?? false;
+          if (!hasOpen) {
+            // All slots claimed — join as spectator to pick vacant teams mid-game or watch
+          }
+        } else if (room.teams.size + room.spectators.size >= 10) {
+          callback({ success: false, error: "Room is full" });
+          return;
+        }
       }
 
       currentRoomId = room.id;
@@ -359,7 +392,7 @@ export function registerHandlers(io: IOServer): void {
       }
 
       // After start: claim a free team only (no switching)
-      if (phase === "auction" || phase === "retention") {
+      if (phase === "auction" || phase === "retention" || phase === "draft" || phase === "catchup") {
         if (existingTeamId) {
           callback?.({ success: false });
           return;
@@ -410,6 +443,123 @@ export function registerHandlers(io: IOServer): void {
       if (!room || room.auction.phase !== "lobby") return;
       if (!isJoined(room, socket.id)) return;
       tryStartGame(io, room, isHost(room, socket.id), socket);
+    });
+
+    socket.on("claim-draft-team", (data, callback) => {
+      if (!currentRoomId) return;
+      const room = getRoom(currentRoomId);
+      if (!room || room.gameType !== "draft") return;
+      const playerName = room.playerNames.get(socket.id) || "Player";
+      const ok = claimDraftTeamSlot(room, data.slotId, socket.id, playerName, {
+        name: data.name,
+        primaryColor: data.primaryColor,
+        secondaryColor: data.secondaryColor,
+        logoUrl: data.logoUrl,
+        logoEmoji: data.logoEmoji,
+      });
+      if (ok) {
+        const token = room.sessionTokens.get(socket.id)!;
+        addActivity(room, "system", `${playerName} claimed ${room.teams.get(data.slotId)?.name}`);
+        io.to(currentRoomId).emit("team-picked", {
+          teamId: data.slotId, playerName, socketId: socket.id, sessionToken: token,
+        });
+        broadcastState(io, room);
+        callback?.({ success: true });
+      } else {
+        callback?.({ success: false, error: "Could not claim team" });
+      }
+    });
+
+    socket.on("edit-draft-team", (data, callback) => {
+      if (!currentRoomId) return;
+      const room = getRoom(currentRoomId);
+      if (!room) return;
+      const ok = editDraftTeamSlot(room, data.slotId, socket.id, isHost(room, socket.id), data);
+      if (ok) broadcastState(io, room);
+      callback?.({ success: ok });
+    });
+
+    socket.on("add-draft-team-slot", (callback) => {
+      if (!currentRoomId) return;
+      const room = getRoom(currentRoomId);
+      if (!room || !isHost(room, socket.id)) return;
+      const slot = addDraftTeamSlot(room);
+      if (slot) {
+        addActivity(room, "system", `Host added team slot: ${slot.name}`);
+        broadcastState(io, room);
+        callback?.({ success: true, slotId: slot.id });
+      } else {
+        callback?.({ success: false });
+      }
+    });
+
+    socket.on("release-draft-team", (callback) => {
+      if (!currentRoomId) return;
+      const room = getRoom(currentRoomId);
+      if (!room) return;
+      const teamId = room.connectedPlayers.get(socket.id);
+      if (releaseDraftTeamSlot(room, socket.id)) {
+        if (teamId) io.to(currentRoomId).emit("team-unpicked", { teamId });
+        broadcastState(io, room);
+        callback?.({ success: true });
+      } else {
+        callback?.({ success: false });
+      }
+    });
+
+    socket.on("make-draft-pick", (data, callback) => {
+      if (!currentRoomId) return;
+      withRoomLock(currentRoomId, () => {
+        const room = getRoom(currentRoomId!);
+        if (!room) return;
+        const teamId = getTeamIdForSocket(room, socket.id);
+        if (!teamId) return;
+        const cycleBefore = room.draft?.cycle ?? 0;
+        const result = processDraftPick(room, teamId, data.playerId);
+        if (!result.success) {
+          socket.emit("error", { message: result.reason || "Pick failed" });
+          callback?.({ success: false, reason: result.reason });
+          return;
+        }
+        const draft = room.draft!;
+        if (draft.cycle > cycleBefore) {
+          io.to(room.id).emit("draft-order-updated", {
+            pickOrder: draft.pickOrder,
+            cycle: draft.cycle,
+            direction: draft.roundDirection,
+          });
+          emitAuctionActivity(io, room, { type: "ORDER_SHUFFLED" });
+          addActivity(room, "system", `Cycle ${draft.cycle} — pick order shuffled`);
+        }
+        const player = draft.picks[draft.picks.length - 1].player;
+        const teamName = room.teams.get(teamId)?.name || teamId;
+        io.to(room.id).emit("draft-pick", {
+          player,
+          teamId,
+          pickNumber: draft.pickNumber - 1,
+          teamName,
+        });
+        emitAuctionActivity(io, room, {
+          type: "DRAFT_PICK",
+          playerName: player.name,
+          teamId,
+          displayName: teamName,
+        });
+        addActivity(room, "sold", `${teamName} drafted ${player.name}`);
+        if (checkDraftComplete(room)) {
+          finishDraft(io, room);
+        } else {
+          io.to(room.id).emit("draft-turn-changed", {
+            teamId: draft.currentPickerId || "",
+            teamName: getCurrentPickerTeamName(room),
+            pickNumber: draft.pickNumber,
+            seconds: draft.timerSeconds,
+          });
+          broadcastState(io, room);
+          resumeDraftTimer(io, room);
+        }
+        callback?.({ success: true });
+      });
     });
 
     socket.on("lock-retentions", (data) => {
@@ -592,27 +742,82 @@ export function registerHandlers(io: IOServer): void {
           break;
         case "set-timer":
           if (typeof data.timerSeconds === "number") {
-            room.bidTimerSeconds = Math.max(5, Math.min(60, data.timerSeconds));
-            if (room.auction.phase === "auction" && room.auction.currentPlayer && !room.auction.isPaused) {
-              room.auction.timerSeconds = Math.min(room.auction.timerSeconds, room.bidTimerSeconds);
-              io.to(room.id).emit("timer-tick", { seconds: room.auction.timerSeconds, type: "auction" });
+            const secs = Math.max(5, Math.min(30, data.timerSeconds));
+            if (room.gameType === "draft") {
+              room.pickTimerSeconds = secs;
+              if (room.draft && (room.auction.phase === "draft" || room.auction.phase === "catchup")) {
+                room.draft.timerSeconds = secs;
+                io.to(room.id).emit("timer-tick", { seconds: secs, type: "auction" });
+              }
+              addActivity(room, "system", `Host set pick timer to ${secs}s`);
+            } else {
+              room.bidTimerSeconds = Math.max(5, Math.min(60, data.timerSeconds));
+              if (room.auction.phase === "auction" && room.auction.currentPlayer && !room.auction.isPaused) {
+                room.auction.timerSeconds = Math.min(room.auction.timerSeconds, room.bidTimerSeconds);
+                io.to(room.id).emit("timer-tick", { seconds: room.auction.timerSeconds, type: "auction" });
+              }
+              addActivity(room, "system", `Host set bid timer to ${room.bidTimerSeconds}s per lot`);
             }
-            addActivity(room, "system", `Host set bid timer to ${room.bidTimerSeconds}s per lot`);
+          }
+          break;
+        case "end-draft":
+          if (room.gameType === "draft") {
+            const end = forceEndDraft(room);
+            if (end.ok) {
+              finishDraft(io, room);
+              addActivity(room, "system", "Host ended the draft");
+            } else {
+              socket.emit("error", { message: end.reason || "Cannot end draft" });
+            }
+          }
+          break;
+        case "skip-pick":
+          if (room.gameType === "draft" && room.draft) {
+            skipDraftPick(room);
+            const picker = room.draft.currentPickerId;
+            if (picker) {
+              emitAuctionActivity(io, room, { type: "PICK_MISSED", teamId: picker });
+            }
+            if (checkDraftComplete(room)) finishDraft(io, room);
+            else {
+              io.to(room.id).emit("draft-turn-changed", {
+                teamId: room.draft.currentPickerId || "",
+                teamName: getCurrentPickerTeamName(room),
+                pickNumber: room.draft.pickNumber,
+                seconds: room.draft.timerSeconds,
+              });
+              resumeDraftTimer(io, room);
+            }
+            broadcastState(io, room);
           }
           break;
         case "pause":
-          room.auction.isPaused = true;
-          if (room.timerInterval) { clearInterval(room.timerInterval); room.timerInterval = null; }
-          room.auction.timerEndsAt = null;
-          addActivity(room, "system", "Host paused the auction");
-          emitAuctionActivity(io, room, { type: "AUCTION_PAUSED" });
+          if (room.gameType === "draft" && room.draft) {
+            room.draft.isPaused = true;
+            if (room.timerInterval) { clearInterval(room.timerInterval); room.timerInterval = null; }
+            room.draft.timerEndsAt = null;
+            addActivity(room, "system", "Host paused the draft");
+          } else {
+            room.auction.isPaused = true;
+            if (room.timerInterval) { clearInterval(room.timerInterval); room.timerInterval = null; }
+            room.auction.timerEndsAt = null;
+            addActivity(room, "system", "Host paused the auction");
+            emitAuctionActivity(io, room, { type: "AUCTION_PAUSED" });
+          }
           broadcastState(io, room);
           break;
         case "resume":
-          room.auction.isPaused = false;
-          if (room.auction.phase === "auction" && room.auction.currentPlayer) resumeAuctionTimer(io, room);
-          addActivity(room, "system", "Host resumed the auction");
-          emitAuctionActivity(io, room, { type: "AUCTION_RESUMED" });
+          if (room.gameType === "draft" && room.draft) {
+            room.draft.isPaused = false;
+            if (room.auction.phase === "draft" || room.auction.phase === "catchup") resumeDraftTimer(io, room);
+            addActivity(room, "system", "Host resumed the draft");
+            emitAuctionActivity(io, room, { type: "AUCTION_RESUMED" });
+          } else {
+            room.auction.isPaused = false;
+            if (room.auction.phase === "auction" && room.auction.currentPlayer) resumeAuctionTimer(io, room);
+            addActivity(room, "system", "Host resumed the auction");
+            emitAuctionActivity(io, room, { type: "AUCTION_RESUMED" });
+          }
           broadcastState(io, room);
           break;
         case "skip-player":
@@ -734,6 +939,92 @@ function startRetentionPhase(io: IOServer, room: Room): void {
       startAuction(io, room);
     }
   }, 1000);
+}
+
+function startDraft(io: IOServer, room: Room): void {
+  if (room.auction.phase !== "lobby") return;
+  room.draft = createInitialDraftState(room);
+  room.auction.phase = "draft";
+  resetDraftTimer(room);
+  io.to(room.id).emit("phase-change", { phase: "draft" });
+  addActivity(room, "system", "Draft started!");
+  emitAuctionActivity(io, room, { type: "DRAFT_STARTED" });
+  io.to(room.id).emit("draft-order-updated", {
+    pickOrder: room.draft.pickOrder,
+    cycle: room.draft.cycle,
+    direction: room.draft.roundDirection,
+  });
+  io.to(room.id).emit("draft-turn-changed", {
+    teamId: room.draft.currentPickerId || "",
+    teamName: getCurrentPickerTeamName(room),
+    pickNumber: room.draft.pickNumber,
+    seconds: room.draft.timerSeconds,
+  });
+  broadcastState(io, room);
+  resumeDraftTimer(io, room);
+}
+
+function resumeDraftTimer(io: IOServer, room: Room): void {
+  if (!room.draft || room.draft.isPaused) return;
+  if (room.auction.phase !== "draft" && room.auction.phase !== "catchup") return;
+  if (room.timerInterval) clearInterval(room.timerInterval);
+  resetDraftTimer(room);
+  room.timerInterval = setInterval(() => tickDraft(io, room), 1000);
+}
+
+function tickDraft(io: IOServer, room: Room): void {
+  const draft = room.draft;
+  if (!draft || draft.isPaused) return;
+  draft.timerSeconds--;
+  draft.timerEndsAt = Date.now() + draft.timerSeconds * 1000;
+  io.to(room.id).emit("timer-tick", { seconds: draft.timerSeconds, type: "auction" });
+  io.to(room.id).emit("room-runtime-state", buildRuntimeState(room));
+
+  if (draft.timerSeconds <= 0) {
+    if (room.timerInterval) { clearInterval(room.timerInterval); room.timerInterval = null; }
+    withRoomLock(room.id, () => {
+      const picker = draft.currentPickerId;
+      const cycleBefore = draft.cycle;
+      onDraftTimerExpired(room);
+      if (picker) {
+        emitAuctionActivity(io, room, { type: "PICK_MISSED", teamId: picker });
+        addActivity(room, "system", `${room.teams.get(picker)?.shortName || picker} missed a pick — catch-up later`);
+      }
+      if (checkDraftComplete(room)) {
+        finishDraft(io, room);
+        return;
+      }
+      const after = room.draft!;
+      if (after.cycle > cycleBefore) {
+        io.to(room.id).emit("draft-order-updated", {
+          pickOrder: after.pickOrder,
+          cycle: after.cycle,
+          direction: after.roundDirection,
+        });
+        emitAuctionActivity(io, room, { type: "ORDER_SHUFFLED" });
+        addActivity(room, "system", `Cycle ${after.cycle} — pick order shuffled`);
+      }
+      io.to(room.id).emit("draft-turn-changed", {
+        teamId: room.draft!.currentPickerId || "",
+        teamName: getCurrentPickerTeamName(room),
+        pickNumber: room.draft!.pickNumber,
+        seconds: room.draft!.timerSeconds,
+      });
+      broadcastState(io, room);
+      resumeDraftTimer(io, room);
+    });
+  }
+}
+
+function finishDraft(io: IOServer, room: Room): void {
+  if (room.timerInterval) { clearInterval(room.timerInterval); room.timerInterval = null; }
+  room.auction.phase = "completed";
+  const teams: Record<string, import("../lib/types").TeamState> = {};
+  for (const [id, team] of room.teams) teams[id] = team;
+  io.to(room.id).emit("auction-complete", { teams });
+  io.to(room.id).emit("phase-change", { phase: "completed" });
+  addActivity(room, "system", "Draft complete!");
+  broadcastState(io, room);
 }
 
 function startAuction(io: IOServer, room: Room): void {

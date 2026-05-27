@@ -1,6 +1,6 @@
 import type { TeamDef } from "./types";
 
-export type LeagueId = "ipl" | "wpl" | "hundred";
+export type LeagueId = "ipl" | "wpl" | "hundred" | "sa20" | "bbl" | "wbbl";
 
 export interface LeagueRules {
   maxFranchises: number;
@@ -41,6 +41,6 @@ export interface LeagueConfig {
   teamGridCols: number;
 }
 
-export const LEAGUE_IDS: LeagueId[] = ["ipl", "wpl", "hundred"];
+export const LEAGUE_IDS: LeagueId[] = ["ipl", "wpl", "hundred", "sa20", "bbl", "wbbl"];
 
 export const DEFAULT_LEAGUE: LeagueId = "ipl";

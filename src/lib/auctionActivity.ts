@@ -7,7 +7,11 @@ export type AuctionActivityKind =
   | "AUCTION_RESUMED"
   | "PLAYER_UNSOLD"
   | "PLAYER_SOLD"
-  | "BID_PLACED";
+  | "BID_PLACED"
+  | "DRAFT_PICK"
+  | "PICK_MISSED"
+  | "ORDER_SHUFFLED"
+  | "DRAFT_STARTED";
 
 export interface AuctionActivity {
   id: string;

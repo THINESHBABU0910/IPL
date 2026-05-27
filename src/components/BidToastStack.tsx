@@ -45,7 +45,7 @@ export function useBidToasts() {
   const [toasts, setToasts] = useState<BidToast[]>([]);
 
   function pushActivity(activity: AuctionActivity) {
-    if (!["BID_PLACED", "PLAYER_SOLD", "PLAYER_UNSOLD"].includes(activity.type)) return;
+    if (!["BID_PLACED", "PLAYER_SOLD", "PLAYER_UNSOLD", "DRAFT_PICK", "PICK_MISSED", "ORDER_SHUFFLED"].includes(activity.type)) return;
     const id = activity.id;
     setToasts((prev) => [...prev.filter((t) => t.id !== id), { id, activity, createdAt: Date.now() }].slice(-4));
     setTimeout(() => {

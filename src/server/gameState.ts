@@ -4,7 +4,13 @@ import {
 
   AuctionMode, ChatMessage, ActivityEntry, ParticipantInfo, TeamDef, RuntimeStatePayload, LeagueId,
 
+  GameType, DraftGender, DraftState, DraftTeamSlot,
+
 } from "../lib/types";
+import { filterExcludedCountries } from "../lib/playerFilter";
+import { getDraftLeagueFromGender } from "../lib/draftRules";
+import { generateDraftTeamSlots, createDraftTeamSlot, draftSlotToTeamState } from "../lib/draftTeamNames";
+import { syncDraftTeamSlotsToTeams, updateSlotFromTeam } from "./draftEngine";
 
 import {
   formatPrice, TIMER_INITIAL, ROUND2_DISCOUNT,
@@ -62,7 +68,7 @@ export function loadPlayersForLeague(league: LeagueId = "ipl"): Player[] {
 
   const raw = fs.readFileSync(resolvePlayersPath(league), "utf-8");
   const data = JSON.parse(raw) as PlayersData;
-  const players = data.players.map((pl: PlayerJSON) => {
+  const players = filterExcludedCountries(data.players).map((pl: PlayerJSON) => {
     const basePriceLakhs = pl.basePrice / 100000;
     return { ...pl, basePriceLakhs, displayPrice: formatLeaguePrice(basePriceLakhs, league) };
   });
@@ -142,9 +148,19 @@ export interface Room {
 
   id: string;
 
+  gameType: GameType;
+
+  draftGender?: DraftGender;
+
   league: LeagueId;
 
   mode: AuctionMode;
+
+  draft?: DraftState;
+
+  draftTeamSlots?: DraftTeamSlot[];
+
+  pickTimerSeconds: number;
 
   teams: Map<string, TeamState>;
 
@@ -215,19 +231,37 @@ export function generateSessionToken(): string {
 
 
 
-export function createRoom(roomId: string, mode: AuctionMode, hostSocketId: string, hostName: string, league: LeagueId = "ipl"): Room {
+export function createRoom(
+  roomId: string,
+  mode: AuctionMode,
+  hostSocketId: string,
+  hostName: string,
+  league: LeagueId = "ipl",
+  gameType: GameType = "auction",
+  draftGender?: DraftGender,
+): Room {
 
   const token = generateSessionToken();
-  const leagueId = parseLeagueId(league);
-  const maxFranchises = getLeagueConfig(leagueId).rules.maxFranchises;
+  const isDraft = gameType === "draft";
+  const leagueId = isDraft && draftGender ? getDraftLeagueFromGender(draftGender) : parseLeagueId(league);
+  const maxFranchises = isDraft ? 10 : getLeagueConfig(leagueId).rules.maxFranchises;
+  const draftSlots = isDraft ? generateDraftTeamSlots(10) : undefined;
 
   const room: Room = {
 
     id: roomId.toUpperCase(),
 
+    gameType,
+
+    draftGender: isDraft ? draftGender : undefined,
+
     league: leagueId,
 
-    mode,
+    mode: isDraft ? "mega" : mode,
+
+    draftTeamSlots: draftSlots,
+
+    pickTimerSeconds: TIMER_INITIAL,
 
     teams: new Map(),
 
@@ -265,7 +299,7 @@ export function createRoom(roomId: string, mode: AuctionMode, hostSocketId: stri
 
     retentionTimeLeft: 180,
 
-    minTeamsToStart: maxFranchises,
+    minTeamsToStart: isDraft ? 2 : maxFranchises,
 
     bidTimerSeconds: TIMER_INITIAL,
 
@@ -274,6 +308,12 @@ export function createRoom(roomId: string, mode: AuctionMode, hostSocketId: stri
     poolMeta: null,
 
   };
+
+  if (isDraft && draftSlots) {
+    for (const slot of draftSlots) {
+      room.teams.set(slot.id, draftSlotToTeamState(slot));
+    }
+  }
 
   room.playerNames.set(hostSocketId, hostName);
 
@@ -426,7 +466,7 @@ export function addChat(room: Room, playerName: string, text: string, teamId?: s
 
     teamId,
 
-    text: text.slice(0, 200),
+    text: text.trim().startsWith("gif:") ? text.slice(0, 512) : text.slice(0, 200),
 
     timestamp: Date.now(),
 
@@ -634,6 +674,119 @@ export function canStartAuction(room: Room, byHost: boolean): { ok: boolean; rea
   return { ok: true };
 }
 
+export function canStartDraft(room: Room, byHost: boolean): { ok: boolean; reason?: string } {
+  if (room.auction.phase !== "lobby") return { ok: false, reason: "Draft already started" };
+  const teamCount = [...room.teams.values()].filter((t) => !t.isVacant && t.ownerId).length;
+  if (teamCount < 2) return { ok: false, reason: "Need at least 2 teams claimed to start" };
+  if (!byHost && teamCount < 2) {
+    return { ok: false, reason: `Waiting for teams (${teamCount}/2 minimum)` };
+  }
+  return { ok: true };
+}
+
+export function claimDraftTeamSlot(
+  room: Room,
+  slotId: string,
+  socketId: string,
+  playerName: string,
+  branding?: Partial<Pick<DraftTeamSlot, "name" | "primaryColor" | "secondaryColor" | "logoUrl" | "logoEmoji">>,
+): boolean {
+  if (room.gameType !== "draft" || !room.draftTeamSlots) return false;
+  const slot = room.draftTeamSlots.find((s) => s.id === slotId);
+  if (!slot || (slot.ownerId && !slot.isVacant)) return false;
+  if (room.connectedPlayers.has(socketId)) return false;
+
+  if (branding?.name) {
+    slot.name = branding.name.slice(0, 32);
+    slot.shortName = branding.name.slice(0, 4).toUpperCase();
+  }
+  if (branding?.primaryColor) slot.primaryColor = branding.primaryColor;
+  if (branding?.secondaryColor) slot.secondaryColor = branding.secondaryColor;
+  if (branding?.logoUrl !== undefined) slot.logoUrl = branding.logoUrl;
+  if (branding?.logoEmoji) slot.logoEmoji = branding.logoEmoji;
+
+  slot.ownerId = socketId;
+  slot.ownerName = playerName;
+  slot.isVacant = false;
+
+  syncDraftTeamSlotsToTeams(room);
+  const team = room.teams.get(slotId)!;
+  team.ownerId = socketId;
+  team.ownerName = playerName;
+  team.isVacant = false;
+  team.isOnline = true;
+  room.connectedPlayers.set(socketId, slotId);
+  room.spectators.delete(socketId);
+
+  const token = room.sessionTokens.get(socketId);
+  if (token) {
+    room.tokenToSocket.set(token, { socketId, teamId: slotId, isSpectator: false });
+  }
+  return true;
+}
+
+export function releaseDraftTeamSlot(room: Room, socketId: string): boolean {
+  if (room.gameType !== "draft" || room.auction.phase !== "lobby") return false;
+  const teamId = room.connectedPlayers.get(socketId);
+  if (!teamId) return false;
+  const slot = room.draftTeamSlots?.find((s) => s.id === teamId);
+  if (!slot) return false;
+
+  slot.ownerId = "";
+  slot.ownerName = "";
+  slot.isVacant = false;
+  const team = room.teams.get(teamId);
+  if (team) {
+    team.ownerId = "";
+    team.ownerName = "";
+    team.isVacant = false;
+    team.isOnline = false;
+  }
+  room.connectedPlayers.delete(socketId);
+  const token = room.sessionTokens.get(socketId);
+  if (token) {
+    room.tokenToSocket.set(token, { socketId, isSpectator: false });
+  }
+  return true;
+}
+
+export function editDraftTeamSlot(
+  room: Room,
+  slotId: string,
+  socketId: string,
+  isHost: boolean,
+  updates: Partial<Pick<DraftTeamSlot, "name" | "primaryColor" | "secondaryColor" | "logoUrl" | "logoEmoji">>,
+): boolean {
+  if (room.gameType !== "draft" || !room.draftTeamSlots) return false;
+  const slot = room.draftTeamSlots.find((s) => s.id === slotId);
+  if (!slot) return false;
+  const isOwner = slot.ownerId === socketId;
+  if (!isHost && !isOwner) return false;
+  if (!isHost && room.auction.phase !== "lobby" && (updates.logoUrl !== undefined || updates.logoEmoji !== undefined)) {
+    return false;
+  }
+
+  if (updates.name) {
+    slot.name = updates.name.slice(0, 32);
+    slot.shortName = updates.name.slice(0, 4).toUpperCase();
+  }
+  if (updates.primaryColor) slot.primaryColor = updates.primaryColor;
+  if (updates.secondaryColor) slot.secondaryColor = updates.secondaryColor;
+  if (updates.logoUrl !== undefined) slot.logoUrl = updates.logoUrl;
+  if (updates.logoEmoji) slot.logoEmoji = updates.logoEmoji;
+
+  syncDraftTeamSlotsToTeams(room);
+  return true;
+}
+
+export function addDraftTeamSlot(room: Room): DraftTeamSlot | null {
+  if (room.gameType !== "draft" || !room.draftTeamSlots) return null;
+  const slot = createDraftTeamSlot(`Team ${room.draftTeamSlots.length + 1}`, Date.now());
+  room.draftTeamSlots.push(slot);
+  room.teams.set(slot.id, draftSlotToTeamState(slot));
+  return slot;
+}
+
 export function claimVacantTeam(
   room: Room, teamId: string, socketId: string, playerName: string,
 ): boolean {
@@ -654,6 +807,7 @@ export function claimOpenTeam(
   team.isOnline = true;
   room.connectedPlayers.set(socketId, teamId);
   room.spectators.delete(socketId);
+  updateSlotFromTeam(room, teamId);
 
   if (room.auction.phase === "retention" && !team.retentionLocked) {
     team.retentionLocked = true;
@@ -704,6 +858,15 @@ export function kickTeamOwner(room: Room, teamId: string): { ownerName: string; 
   team.isVacant = true;
   team.isOnline = false;
   team.ownerId = "";
+  updateSlotFromTeam(room, teamId);
+  if (room.draftTeamSlots) {
+    const slot = room.draftTeamSlots.find((s) => s.id === teamId);
+    if (slot) {
+      slot.isVacant = true;
+      slot.ownerId = "";
+      slot.ownerName = "";
+    }
+  }
 
   if (ownerSocketId) {
     room.connectedPlayers.delete(ownerSocketId);
@@ -999,6 +1162,10 @@ export function serializeRoom(room: Room, io?: { sockets: { sockets: Map<string,
 
     id: room.id,
 
+    gameType: room.gameType || "auction",
+
+    draftGender: room.draftGender,
+
     league: getRoomLeague(room),
 
     mode: room.mode,
@@ -1006,6 +1173,12 @@ export function serializeRoom(room: Room, io?: { sockets: { sockets: Map<string,
     teams,
 
     auction: { ...room.auction, remainingPool: [] },
+
+    draft: room.draft,
+
+    draftTeamSlots: room.draftTeamSlots,
+
+    pickTimerSeconds: room.pickTimerSeconds,
 
     createdAt: room.createdAt,
 
@@ -1060,8 +1233,13 @@ export function importRoomFromSnapshot(raw: Record<string, unknown>): Room | nul
 
     const room: Room = {
       id,
+      gameType: (raw.gameType as GameType) || "auction",
+      draftGender: raw.draftGender as DraftGender | undefined,
       league: leagueId,
       mode: raw.mode as AuctionMode,
+      draft: raw.draft as DraftState | undefined,
+      draftTeamSlots: raw.draftTeamSlots as DraftTeamSlot[] | undefined,
+      pickTimerSeconds: Number(raw.pickTimerSeconds) || TIMER_INITIAL,
       teams: new Map(Object.entries((raw.teams as Record<string, TeamState>) || {})),
       auction: { ...(auctionRaw as unknown as AuctionState), remainingPool },
       connectedPlayers: new Map(Object.entries((raw.connectedPlayers as Record<string, string>) || {})),

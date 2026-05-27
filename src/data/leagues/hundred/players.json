@@ -304,12 +304,12 @@
     },
     {
       "id": "HP018",
-      "name": "Naseem Shah",
-      "country": "Pakistan",
-      "role": "BOWLER",
+      "name": "Jamie Overton",
+      "country": "England",
+      "role": "ALL-ROUNDER",
       "battingStyle": "RHB",
       "basePrice": 20000000,
-      "isOverseas": true,
+      "isOverseas": false,
       "previousTeam": "WEF",
       "category": "Marquee Players",
       "set": "M1",
@@ -1130,20 +1130,6 @@
     },
     {
       "id": "HP077",
-      "name": "Jamie Overton",
-      "country": "England",
-      "role": "ALL-ROUNDER",
-      "battingStyle": "RHB",
-      "basePrice": 7500000,
-      "isOverseas": false,
-      "previousTeam": "SOB",
-      "category": "All-Rounders",
-      "set": "AL2",
-      "age": 26,
-      "isCapped": true
-    },
-    {
-      "id": "HP078",
       "name": "Matt Parkinson",
       "country": "England",
       "role": "BOWLER",
@@ -1157,7 +1143,7 @@
       "isCapped": true
     },
     {
-      "id": "HP079",
+      "id": "HP078",
       "name": "Adil Rashid",
       "country": "England",
       "role": "BOWLER",
@@ -1171,7 +1157,7 @@
       "isCapped": true
     },
     {
-      "id": "HP080",
+      "id": "HP079",
       "name": "Jonny Bairstow",
       "country": "England",
       "role": "WICKETKEEPER",
@@ -1185,7 +1171,7 @@
       "isCapped": true
     },
     {
-      "id": "HP081",
+      "id": "HP080",
       "name": "Jason Roy",
       "country": "England",
       "role": "BATTER",
@@ -1199,7 +1185,7 @@
       "isCapped": true
     },
     {
-      "id": "HP082",
+      "id": "HP081",
       "name": "Eoin Morgan",
       "country": "England",
       "role": "BATTER",
@@ -1209,6 +1195,20 @@
       "previousTeam": "LNS",
       "category": "All-Rounders",
       "set": "AL2",
+      "age": 26,
+      "isCapped": true
+    },
+    {
+      "id": "HP082",
+      "name": "Pool Player 82",
+      "country": "England",
+      "role": "BOWLER",
+      "battingStyle": "RHB",
+      "basePrice": 7500000,
+      "isOverseas": false,
+      "previousTeam": "MNR",
+      "category": "Spin Bowlers",
+      "set": "SP2",
       "age": 26,
       "isCapped": true
     },

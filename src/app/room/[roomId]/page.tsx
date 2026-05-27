@@ -3,8 +3,10 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { getSocket } from "@/lib/socket";
-import { RoomState, Player, ChatMessage } from "@/lib/types";
+import { RoomState, Player, ChatMessage, GameType } from "@/lib/types";
 import Lobby, { LobbyTabId } from "@/components/Lobby";
+import DraftLobby, { DraftLobbyTabId } from "@/components/DraftLobby";
+import DraftPhase, { DraftTabId } from "@/components/DraftPhase";
 import RetentionPhase from "@/components/RetentionPhase";
 import AuctionComplete from "@/components/AuctionComplete";
 import ChatPanel from "@/components/ChatPanel";
@@ -48,7 +50,7 @@ function updateRecentRoomTeam(roomId: string, teamId: string, mode: string): voi
 type AuctionTab = "chat" | "squad" | "users" | "settings";
 type RetentionTab = "pick" | "chat" | "settings";
 type CompletedTab = "results" | "squad" | "settings";
-type RoomTab = LobbyTabId | AuctionTab | RetentionTab | CompletedTab;
+type RoomTab = LobbyTabId | AuctionTab | RetentionTab | CompletedTab | DraftLobbyTabId | DraftTabId;
 
 export default function RoomPage() {
   const params = useParams();
@@ -67,6 +69,7 @@ export default function RoomPage() {
   const [poolOpen, setPoolOpen] = useState(false);
   const socketRef = useRef(getSocket());
   const myTeamIdRef = useRef<string | null>(null);
+  const gameTypeRef = useRef<GameType>("auction");
   const connectedRef = useRef(false);
 
   const [soldInfo, setSoldInfo] = useState<{ player: Player; teamId: string; price: number } | null>(null);
@@ -92,9 +95,11 @@ export default function RoomPage() {
   }, [roomId]);
 
   const mergeRoomState = useCallback((state: RoomState) => {
-    setRoomState({ ...state, league: state.league ?? "ipl" });
+    gameTypeRef.current = state.gameType || "auction";
+    setRoomState({ ...state, league: state.league ?? "ipl", gameType: state.gameType || "auction" });
     setOfflineMode(false);
-    setTimerSeconds(state.auction.timerSeconds);
+    const t = state.draft?.timerSeconds ?? state.auction.timerSeconds;
+    setTimerSeconds(t);
     const socket = socketRef.current;
     let foundTeam = false;
     for (const [teamId, team] of Object.entries(state.teams)) {
@@ -236,16 +241,43 @@ export default function RoomPage() {
     socket.on("rtm-used", (data) => { setRtmInfo(null); playSoldSound(); });
     socket.on("rtm-declined", () => setRtmInfo(null));
     socket.on("timer-tick", ({ seconds, type }) => {
-      if (type === "auction") {
+      if (type === "auction" || !type) {
         setTimerSeconds(seconds);
         if (seconds <= 5 && seconds >= 1) playTimerWarning(seconds);
         if (seconds === 0) playTimerFinalBeep();
       }
     });
+    socket.on("draft-pick", (data) => {
+      playSoldSound();
+      fireSoldConfetti();
+      pushBidToastRef.current({
+        id: `draft-${Date.now()}`,
+        type: "DRAFT_PICK",
+        timestamp: Date.now(),
+        playerName: data.player.name,
+        teamId: data.teamId,
+        displayName: data.teamName,
+      });
+    });
+    socket.on("draft-turn-changed", ({ seconds }) => setTimerSeconds(seconds));
+    socket.on("draft-order-updated", () => {
+      pushBidToastRef.current({
+        id: `shuffle-${Date.now()}`,
+        type: "ORDER_SHUFFLED",
+        timestamp: Date.now(),
+      });
+    });
     socket.on("phase-change", ({ phase }) => {
-      if (phase === "lobby") { setMyTeamId(null); myTeamIdRef.current = null; setActiveTab("players"); }
+      if (phase === "lobby") {
+        setActiveTab(gameTypeRef.current === "draft" ? "teams" : "players");
+        if (gameTypeRef.current !== "draft") {
+          setMyTeamId(null);
+          myTeamIdRef.current = null;
+        }
+      }
       if (phase === "retention") setActiveTab("pick");
       if (phase === "auction") setActiveTab("chat");
+      if (phase === "draft" || phase === "catchup") setActiveTab("pick");
       if (phase === "completed") setActiveTab("results");
     });
 
@@ -268,6 +300,9 @@ export default function RoomPage() {
       socket.off("rtm-declined");
       socket.off("timer-tick");
       socket.off("phase-change");
+      socket.off("draft-pick");
+      socket.off("draft-turn-changed");
+      socket.off("draft-order-updated");
     };
   }, [roomId, router, mergeRoomState, nameConfirmed, playerName, appendChat]);
 
@@ -293,7 +328,8 @@ export default function RoomPage() {
 
   function hostPauseResume() {
     if (!isHost) return;
-    const action = roomState?.auction.isPaused ? "resume" : "pause";
+    const paused = roomState?.auction.isPaused || roomState?.draft?.isPaused;
+    const action = paused ? "resume" : "pause";
     socketRef.current.emit("host-action", { action });
   }
 
@@ -330,23 +366,40 @@ export default function RoomPage() {
   }
 
   const phase = roomState.auction.phase;
+  const isDraftRoom = roomState.gameType === "draft";
   const participantCount = roomState.participants.length || Object.keys(roomState.teams).length;
-  const joinedTeams = Object.values(roomState.teams).filter((t) => !t.isVacant).length;
-  const maxFr = getLeagueConfig(roomState.league).rules.maxFranchises;
-  const allTeamsIn = joinedTeams >= maxFr;
+  const joinedTeams = Object.values(roomState.teams).filter((t) => !t.isVacant && t.ownerId).length;
+  const maxFr = isDraftRoom ? 2 : getLeagueConfig(roomState.league).rules.maxFranchises;
+  const allTeamsIn = isDraftRoom ? joinedTeams >= 2 : joinedTeams >= getLeagueConfig(roomState.league).rules.maxFranchises;
   const canHeaderStart = phase === "lobby" && (allTeamsIn || isHost) && joinedTeams >= 2;
+  const draftPaused = roomState.draft?.isPaused;
   const mySquadSize = myTeamId && roomState.teams[myTeamId]
-    ? roomState.teams[myTeamId].squad.length + roomState.teams[myTeamId].retainedPlayers.length
+    ? roomState.teams[myTeamId].squad.length +
+      (roomState.gameType === "draft" ? 0 : roomState.teams[myTeamId].retainedPlayers.length)
     : 0;
   const chatCount = roomState.chat.length;
 
   let bottomTabs: { id: string; label: string; icon: string; badge?: number; variant?: "chat" | "squad" | "settings" | "default" }[] = [];
 
-  if (phase === "auction") {
+  if (phase === "draft" || phase === "catchup") {
+    bottomTabs = [
+      { id: "pick", label: "Draft", icon: "🎯" },
+      { id: "chat", label: "Chat", icon: "💬", badge: chatCount, variant: "chat" },
+      { id: "squad", label: "Squad", icon: "💼", badge: mySquadSize, variant: "squad" },
+      { id: "users", label: "Users", icon: "👥", badge: participantCount },
+      { id: "settings", label: "Settings", icon: "⚙️", variant: "settings" },
+    ];
+  } else if (phase === "auction") {
     bottomTabs = [
       { id: "chat", label: "Chat", icon: "💬", badge: chatCount, variant: "chat" },
       { id: "squad", label: "Squad", icon: "💼", badge: mySquadSize, variant: "squad" },
       { id: "users", label: "Users", icon: "👥", badge: participantCount },
+      { id: "settings", label: "Settings", icon: "⚙️", variant: "settings" },
+    ];
+  } else if (phase === "lobby" && isDraftRoom) {
+    bottomTabs = [
+      { id: "teams", label: "Teams", icon: "🏏", badge: joinedTeams },
+      { id: "chat", label: "Chat", icon: "💬", badge: chatCount, variant: "chat" },
       { id: "settings", label: "Settings", icon: "⚙️", variant: "settings" },
     ];
   } else if (phase === "lobby") {
@@ -389,9 +442,9 @@ export default function RoomPage() {
         <div className="flex items-center gap-1 shrink-0">
           <button type="button" onClick={shareWhatsApp} className="ref-icon-btn text-green-400 text-xs" aria-label="WhatsApp">W</button>
           <button type="button" onClick={copyInvite} className="ref-icon-btn text-xs" aria-label="Share">↗</button>
-          {phase === "auction" && isHost && (
+          {(phase === "auction" || phase === "draft" || phase === "catchup") && isHost && (
             <button type="button" onClick={hostPauseResume} className="ref-icon-btn text-green-400 text-xs">
-              {roomState.auction.isPaused ? "▶" : "⏸"}
+              {(roomState.auction.isPaused || draftPaused) ? "▶" : "⏸"}
             </button>
           )}
           <button type="button" onClick={toggleSound} className="ref-icon-btn text-[#FFD700] text-xs">
@@ -479,7 +532,48 @@ export default function RoomPage() {
           </>
         )}
 
-        {phase === "lobby" && (
+        {(phase === "draft" || phase === "catchup") && (
+          <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+            <SpectatorBar roomState={roomState} myTeamId={myTeamId} socket={socketRef.current} />
+            {(activeTab === "pick" || activeTab === "chat") && (
+              <BidToastStack
+                toasts={bidToasts}
+                roomState={roomState}
+                onDismiss={dismissBidToast}
+              />
+            )}
+            <DraftPhase
+              roomState={roomState}
+              myTeamId={myTeamId}
+              socket={socketRef.current}
+              isSpectator={isSpectator}
+              playerName={playerName || ""}
+              isHost={!!isHost}
+              activeTab={activeTab as DraftTabId}
+              roomId={roomId}
+              timerSeconds={timerSeconds}
+              soundOn={soundOn}
+              onToggleSound={toggleSound}
+            />
+          </div>
+        )}
+
+        {phase === "lobby" && isDraftRoom && (
+          <DraftLobby
+            roomState={roomState}
+            myTeamId={myTeamId}
+            socket={socketRef.current}
+            isSpectator={isSpectator}
+            playerName={playerName || ""}
+            isHost={!!isHost}
+            activeTab={activeTab as DraftLobbyTabId}
+            roomId={roomId}
+            soundOn={soundOn}
+            onToggleSound={toggleSound}
+          />
+        )}
+
+        {phase === "lobby" && !isDraftRoom && (
           <Lobby
             roomState={roomState}
             myTeamId={myTeamId}

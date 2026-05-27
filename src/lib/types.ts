@@ -108,9 +108,50 @@ export interface ParticipantInfo {
   isOnline: boolean;
 }
 
-export type GamePhase = "lobby" | "retention" | "auction" | "completed";
+export type GamePhase = "lobby" | "retention" | "auction" | "draft" | "catchup" | "completed";
 export type AuctionMode = "mega" | "custom_retention" | "flex_retention";
-export type LeagueId = "ipl" | "wpl" | "hundred";
+export type LeagueId = "ipl" | "wpl" | "hundred" | "sa20" | "bbl" | "wbbl";
+export type GameType = "auction" | "draft";
+export type DraftGender = "mens" | "womens";
+
+export interface DraftTeamSlot {
+  id: string;
+  name: string;
+  shortName: string;
+  primaryColor: string;
+  secondaryColor: string;
+  logoUrl: string;
+  logoEmoji?: string;
+  ownerId: string;
+  ownerName: string;
+  isCustom: boolean;
+  isVacant?: boolean;
+}
+
+export interface DraftPickEntry {
+  player: Player;
+  teamId: string;
+  pickNumber: number;
+  timestamp: number;
+}
+
+export interface DraftState {
+  cycle: number;
+  roundDirection: "forward" | "reverse";
+  pickOrder: string[];
+  currentPickIndex: number;
+  currentPickerId: string | null;
+  pickNumber: number;
+  availablePlayerIds: string[];
+  deferredPicks: Record<string, number>;
+  catchupQueue: string[];
+  catchupIndex: number;
+  inCatchup: boolean;
+  timerSeconds: number;
+  timerEndsAt: number | null;
+  isPaused: boolean;
+  picks: DraftPickEntry[];
+}
 
 export interface AuctionState {
   currentPlayer: Player | null;
@@ -162,10 +203,14 @@ export interface RuntimeStatePayload {
 
 export interface RoomState {
   id: string;
+  gameType: GameType;
+  draftGender?: DraftGender;
   league: LeagueId;
   mode: AuctionMode;
   teams: Record<string, TeamState>;
   auction: AuctionState;
+  draft?: DraftState;
+  draftTeamSlots?: DraftTeamSlot[];
   createdAt: number;
   hostId: string;
   hostName: string;
@@ -178,6 +223,7 @@ export interface RoomState {
   poolRemaining: number;
   minTeamsToStart: number;
   bidTimerSeconds: number;
+  pickTimerSeconds?: number;
   upcomingPreview?: Player[];
   upcomingPreviewBySet?: SetPreviewGroup[];
 }
@@ -188,9 +234,34 @@ export interface BidResult {
 }
 
 export interface CreateRoomPayload {
-  mode: AuctionMode;
+  mode?: AuctionMode;
   league?: LeagueId;
+  gameType?: GameType;
+  draftGender?: DraftGender;
   playerName: string;
+}
+
+export interface ClaimDraftTeamPayload {
+  slotId: string;
+  name?: string;
+  primaryColor?: string;
+  secondaryColor?: string;
+  logoUrl?: string;
+  logoEmoji?: string;
+  franchiseId?: string;
+}
+
+export interface EditDraftTeamPayload {
+  slotId: string;
+  name?: string;
+  primaryColor?: string;
+  secondaryColor?: string;
+  logoUrl?: string;
+  logoEmoji?: string;
+}
+
+export interface MakeDraftPickPayload {
+  playerId: string;
 }
 
 export interface JoinRoomPayload {
@@ -215,7 +286,7 @@ export interface ChatPayload {
 }
 
 export interface HostActionPayload {
-  action: "add-time" | "remove-time" | "set-timer" | "skip-player" | "pause" | "resume" | "kick" | "start-now" | "rematch" | "force-sold";
+  action: "add-time" | "remove-time" | "set-timer" | "skip-player" | "pause" | "resume" | "kick" | "start-now" | "rematch" | "force-sold" | "end-draft" | "skip-pick";
   targetTeamId?: string;
   timerSeconds?: number;
 }
@@ -251,6 +322,9 @@ export interface ServerToClientEvents {
   "rtm-used": (data: { player: Player; teamId: string; price: number }) => void;
   "rtm-declined": (data: { player: Player }) => void;
   "rtm-tick": (data: { seconds: number }) => void;
+  "draft-pick": (data: { player: Player; teamId: string; pickNumber: number; teamName: string }) => void;
+  "draft-order-updated": (data: { pickOrder: string[]; cycle: number; direction: string }) => void;
+  "draft-turn-changed": (data: { teamId: string; teamName: string; pickNumber: number; seconds: number }) => void;
   "auction-complete": (data: { teams: Record<string, TeamState> }) => void;
   "chat-message": (msg: ChatMessage) => void;
   "activity-entry": (entry: ActivityEntry) => void;
@@ -279,4 +353,9 @@ export interface ClientToServerEvents {
   "host-action": (data: HostActionPayload) => void;
   "start-game": () => void;
   "join-as-spectator": (data: { roomId: string; playerName: string }, callback: (res: { success: boolean; sessionToken?: string; error?: string }) => void) => void;
+  "claim-draft-team": (data: ClaimDraftTeamPayload, callback?: (res: { success: boolean; error?: string }) => void) => void;
+  "edit-draft-team": (data: EditDraftTeamPayload, callback?: (res: { success: boolean; error?: string }) => void) => void;
+  "add-draft-team-slot": (callback?: (res: { success: boolean; slotId?: string }) => void) => void;
+  "release-draft-team": (callback?: (res: { success: boolean }) => void) => void;
+  "make-draft-pick": (data: MakeDraftPickPayload, callback?: (res: { success: boolean; reason?: string }) => void) => void;
 }

@@ -515,8 +515,8 @@
     },
     {
       "id": "WP033",
-      "name": "Diana Baig",
-      "country": "Pakistan",
+      "name": "Marizanne Kapp",
+      "country": "South Africa",
       "role": "ALL-ROUNDER",
       "battingStyle": "RHB",
       "basePrice": 5000000,
@@ -524,7 +524,7 @@
       "previousTeam": "UPW",
       "category": "All-Rounders",
       "set": "AL3",
-      "age": 28,
+      "age": 35,
       "isCapped": true
     },
     {
@@ -1484,8 +1484,8 @@
     },
     {
       "id": "WP101",
-      "name": "Nida Dar",
-      "country": "Pakistan",
+      "name": "Amelia Kerr",
+      "country": "New Zealand",
       "role": "ALL-ROUNDER",
       "battingStyle": "RHB",
       "basePrice": 7500000,
@@ -1498,15 +1498,15 @@
     },
     {
       "id": "WP102",
-      "name": "Fatima Sana",
-      "country": "Pakistan",
-      "role": "ALL-ROUNDER",
+      "name": "Lea Tahuhu",
+      "country": "New Zealand",
+      "role": "BOWLER",
       "battingStyle": "RHB",
       "basePrice": 5000000,
       "isOverseas": true,
       "previousTeam": "UPW",
-      "category": "All-Rounders",
-      "set": "AL3",
+      "category": "Fast Bowlers",
+      "set": "FA3",
       "age": 26,
       "isCapped": true
     },
