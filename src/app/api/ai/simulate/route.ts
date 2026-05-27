@@ -43,7 +43,7 @@ function buildFinalMatch(
   });
   match = repairMatchStats(match, matchOvers);
   match = polishMatchResult(match, matchOvers);
-  return enrichMatchWithBowling(match, teamA, teamB, ctx.venue.pitchType, matchOvers);
+  return enrichMatchWithBowling(match, teamA, teamB, ctx.venue.pitchType, matchOvers, ctx.venue.boundarySize);
 }
 
 function runLocalSimulation(ctx: NormalizeContext, matchOvers: number) {
@@ -207,6 +207,7 @@ export async function POST(req: NextRequest) {
       parsed.teamB,
       venue.pitchType,
       matchOvers,
+      venue.boundarySize,
     );
 
     const pdfBuffer = await generateMatchScorecardPdf(matchResult);

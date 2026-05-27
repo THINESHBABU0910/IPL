@@ -17,9 +17,13 @@ import {
   getBatterProfile,
   conditionPerformanceBoost,
   bowlerWicketWeightBoost,
-  bowlerEconomyMultiplier,
   isValidImpactActivatedAt,
 } from "./playerPerformance";
+import {
+  buildBowlingRowsFromQuota,
+  distributeWicketsWeightedForTeam,
+  type BuildBowlingContext,
+} from "./bowlingFigures";
 
 function cleanName(name: string): string {
   return sanitizePlayerName(name);
@@ -347,6 +351,7 @@ function buildBowlingFromQuota(
   wickets: number,
   matchOvers: number,
   pitchType: string,
+  bowlingCtx: BuildBowlingContext,
   batting?: MatchResult["innings"][0]["batting"],
 ): NonNullable<MatchResult["innings"][0]["bowling"]> {
   const quota = fieldingTeam.bowlingQuota;
@@ -356,33 +361,13 @@ function buildBowlingFromQuota(
   if (batting?.length) {
     wktSplit = wicketSplitFromDismissals(batting, fieldingTeam, wickets, pitchType);
   } else {
-    const runOuts = 0;
-    wktSplit = distributeWicketsWeighted(Math.max(0, wickets - runOuts), fieldingTeam, pitchType);
+    wktSplit = distributeWicketsWeightedForTeam(Math.max(0, wickets), fieldingTeam, pitchType);
   }
 
-  const runWeights = quota.map(
-    (q) => q.overs.length * bowlerEconomyMultiplier(cleanName(q.name), fieldingTeam, pitchType),
-  );
-  const runWeightSum = runWeights.reduce((a, b) => a + b, 0) || 1;
-  let runsLeft = runsConceded;
-
-  return quota.map((q, i) => {
-    const bowlerOvers = q.overs.length;
-    const isLast = i === quota.length - 1;
-    const runs = isLast ? runsLeft : Math.round(runsConceded * (runWeights[i] / runWeightSum));
-    runsLeft -= runs;
-    const finalRuns = Math.max(0, runs);
-    return {
-      name: cleanName(q.name),
-      overs: bowlerOvers,
-      maidens: 0,
-      runs: finalRuns,
-      wickets: wktSplit[i] ?? 0,
-      economy: bowlerOvers > 0 ? Math.round((finalRuns / bowlerOvers) * 100) / 100 : 0,
-      isImpact: fieldingTeam.impactPlayer?.name
-        ? nameMatch(fieldingTeam.impactPlayer.name, q.name)
-        : false,
-    };
+  return buildBowlingRowsFromQuota(fieldingTeam, runsConceded, wktSplit, {
+    ...bowlingCtx,
+    pitchType,
+    matchOvers,
   });
 }
 
@@ -703,6 +688,14 @@ export function enrichMatchFromSquads(match: MatchResult, ctx: SquadEnrichContex
     inn1.totalWickets,
     ctx.matchOvers,
     ctx.venue.pitchType,
+    {
+      pitchType: ctx.venue.pitchType,
+      dewCondition: ctx.venue.typicalDew,
+      inningsIndex: 0,
+      matchOvers: ctx.matchOvers,
+      boundarySize: ctx.venue.boundarySize,
+      seedKey: `${ctx.teamA.name}-${ctx.teamB.name}-${ctx.venue.id}`,
+    },
     inn1.batting,
   );
   inn2.bowling = buildBowlingFromQuota(
@@ -711,6 +704,14 @@ export function enrichMatchFromSquads(match: MatchResult, ctx: SquadEnrichContex
     inn2.totalWickets,
     ctx.matchOvers,
     ctx.venue.pitchType,
+    {
+      pitchType: ctx.venue.pitchType,
+      dewCondition: ctx.venue.typicalDew,
+      inningsIndex: 1,
+      matchOvers: ctx.matchOvers,
+      boundarySize: ctx.venue.boundarySize,
+      seedKey: `${ctx.teamA.name}-${ctx.teamB.name}-${ctx.venue.id}`,
+    },
     inn2.batting,
   );
 

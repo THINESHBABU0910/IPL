@@ -1,8 +1,12 @@
 import type { MatchResult, ParsedTeam } from "./matchSchema";
 import { rebuildPartnershipsAndFow, syncBoundaries, notOutsForWickets } from "./matchSquadEnricher";
 import { sanitizePlayerName, sanitizeDismissalStatus, namesMatch } from "./playerNames";
-import { bowlerEconomyMultiplier } from "./playerPerformance";
-import { distributeWicketsByQuota } from "./realismEngine";
+import {
+  buildBowlingRowsFromQuota,
+  distributeWicketsWeightedForTeam,
+  economySpread,
+  type BuildBowlingContext,
+} from "./bowlingFigures";
 
 function isNotOut(status: string): boolean {
   return /not out/i.test(status);
@@ -53,14 +57,7 @@ function distributeWicketsForTeam(
   fieldingTeam: ParsedTeam,
   pitchType: string,
 ): number[] {
-  const quota = fieldingTeam.bowlingQuota;
-  if (!quota.length || totalCredits <= 0) return new Array(quota.length).fill(0);
-  const weights = quota.map(
-    (q) =>
-      q.overs.length *
-      (1 + (bowlerEconomyMultiplier(q.name, fieldingTeam, pitchType) < 1 ? 0.15 : 0)),
-  );
-  return distributeWicketsByQuota(totalCredits, weights);
+  return distributeWicketsWeightedForTeam(totalCredits, fieldingTeam, pitchType);
 }
 
 function wicketCountsFromDismissals(
@@ -137,71 +134,53 @@ function fixOrphanDismissals(
 export function rebuildBowlingForInnings(
   inn: MatchResult["innings"][0],
   fieldingTeam: ParsedTeam,
-  pitchType: string,
-  _matchOvers: number,
+  bowlingCtx: BuildBowlingContext,
 ): NonNullable<MatchResult["innings"][0]["bowling"]> {
   const quota = fieldingTeam.bowlingQuota;
   if (!quota.length) return [];
 
-  const wktSplit = wicketCountsFromDismissals(
+  let wktSplit = wicketCountsFromDismissals(
     inn.batting,
     fieldingTeam,
     inn.totalWickets,
-    pitchType,
+    bowlingCtx.pitchType,
   );
-  const runWeights = quota.map(
-    (q) => q.overs.length * bowlerEconomyMultiplier(q.name, fieldingTeam, pitchType),
-  );
-  const runWeightSum = runWeights.reduce((a, b) => a + b, 0) || 1;
-  let runsLeft = inn.totalRuns;
 
-  const rows = quota.map((q, i) => {
-    const bowlerOvers = q.overs.length;
-    const isLast = i === quota.length - 1;
-    const runs = isLast ? runsLeft : Math.round(inn.totalRuns * (runWeights[i] / runWeightSum));
-    runsLeft -= runs;
-    const finalRuns = Math.max(0, runs);
-    return {
-      name: sanitizePlayerName(q.name),
-      overs: bowlerOvers,
-      maidens: 0,
-      runs: finalRuns,
-      wickets: wktSplit[i] ?? 0,
-      economy: bowlerOvers > 0 ? Math.round((finalRuns / bowlerOvers) * 100) / 100 : 0,
-      isImpact: fieldingTeam.impactPlayer?.name
-        ? namesMatch(fieldingTeam.impactPlayer.name, q.name)
-        : false,
-    };
-  });
-
+  let rows = buildBowlingRowsFromQuota(fieldingTeam, inn.totalRuns, wktSplit, bowlingCtx);
   fixOrphanDismissals(inn.batting, rows, fieldingTeam);
 
-  const finalSplit = wicketCountsFromDismissals(
+  wktSplit = wicketCountsFromDismissals(
     inn.batting,
     fieldingTeam,
     inn.totalWickets,
-    pitchType,
+    bowlingCtx.pitchType,
   );
-  for (let i = 0; i < rows.length; i++) {
-    rows[i].wickets = finalSplit[i] ?? 0;
-  }
-
+  rows = buildBowlingRowsFromQuota(fieldingTeam, inn.totalRuns, wktSplit, bowlingCtx);
   return rows;
 }
 
-/** Rebuild bowling figures for both innings and sync dismissals — call after repairMatchStats */
 export function rebuildBowlingForMatch(
   match: MatchResult,
   teamA: ParsedTeam,
   teamB: ParsedTeam,
   pitchType: string,
   matchOvers: number,
+  boundarySize?: string,
+  seedSuffix = "0",
 ): MatchResult {
   const fielding = resolveFieldingTeams(match, teamA, teamB);
+  const seedKey = `${match.matchTitle || `${teamA.name}-${teamB.name}-${match.venue}`}-${seedSuffix}`;
   const innings = match.innings.map((inn, idx) => {
     const mapping = fielding.find((f) => f.inningsIdx === idx);
     if (!mapping) return inn;
-    const bowling = rebuildBowlingForInnings(inn, mapping.fieldingTeam, pitchType, matchOvers);
+    const bowling = rebuildBowlingForInnings(inn, mapping.fieldingTeam, {
+      pitchType,
+      dewCondition: match.dewCondition,
+      inningsIndex: idx,
+      matchOvers,
+      boundarySize,
+      seedKey: `${seedKey}-inn${idx}`,
+    });
     return { ...inn, bowling };
   }) as MatchResult["innings"];
 
@@ -216,11 +195,12 @@ export function ensureMatchReadyForPdf(
   teamB: ParsedTeam,
   pitchType: string,
   matchOvers: number,
+  boundarySize?: string,
 ): MatchResult {
-  let current = rebuildBowlingForMatch(match, teamA, teamB, pitchType, matchOvers);
+  let current = rebuildBowlingForMatch(match, teamA, teamB, pitchType, matchOvers, boundarySize, "init");
   for (let pass = 0; pass < 2; pass++) {
     current = repairMatchStats(current, matchOvers);
-    current = rebuildBowlingForMatch(current, teamA, teamB, pitchType, matchOvers);
+    current = rebuildBowlingForMatch(current, teamA, teamB, pitchType, matchOvers, boundarySize, `pass-${pass}`);
     const errors = [
       ...validateMatchResult(current, matchOvers, teamA, teamB),
       ...validateBowlingFromQuota(current, teamA, teamB, matchOvers),
@@ -515,6 +495,12 @@ export function validateBowlingStats(
         errors.push(`${label}: ${row.name} economy ${row.economy} expected ${expectedEco}`);
       }
     }
+
+    const spread = economySpread(inn.bowling);
+    const activeBowlers = inn.bowling.filter((b) => b.overs > 0).length;
+    if (activeBowlers >= 3 && spread < 1.25) {
+      errors.push(`${label}: bowling economies too uniform (spread ${spread.toFixed(2)}, need ≥1.25)`);
+    }
   }
 
   return errors;
@@ -567,6 +553,7 @@ export function enrichMatchWithBowling(
   teamB: ParsedTeam,
   pitchType: string,
   matchOvers: number,
+  boundarySize?: string,
 ): MatchResult {
-  return rebuildBowlingForMatch(match, teamA, teamB, pitchType, matchOvers);
+  return rebuildBowlingForMatch(match, teamA, teamB, pitchType, matchOvers, boundarySize);
 }
