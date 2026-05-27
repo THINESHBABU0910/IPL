@@ -1,4 +1,5 @@
 import type { ParsedTeam } from "./matchSchema";
+import { sanitizePlayerName } from "./playerNames";
 
 export interface ParseResult {
   team: ParsedTeam;
@@ -20,6 +21,7 @@ function normalizeName(raw: string): string {
 function parsePlayerLine(line: string): {
   name: string;
   overseas: boolean;
+  isNew: boolean;
   isCaptain: boolean;
   isWicketkeeper: boolean;
   role: "batter" | "bowler" | "allrounder" | "wicketkeeper" | "unknown";
@@ -30,6 +32,7 @@ function parsePlayerLine(line: string): {
   if (/^(impact|bowling quota|total|extras)/i.test(trimmed)) return null;
 
   const overseas = OVERSEAS_MARKERS.test(trimmed);
+  const isNew = /\(new\)|\bnew signing\b|debut|uncapped|rookie|first season/i.test(trimmed);
   const isCaptain = /\(\s*C\s*\)|\(\s*Capt(?:ain)?\s*\)/i.test(trimmed);
   const isWicketkeeper = /\(\s*W\s*\/?\s*K\s*\)|\(\s*Wicketkeeper\s*\)|\(\s*wk\s*\)/i.test(trimmed);
 
@@ -49,28 +52,29 @@ function parsePlayerLine(line: string): {
   else if (notes === "batting only" || /batsm/i.test(lower)) role = "batter";
   else if (notes === "allrounder") role = "allrounder";
 
-  const name = normalizeName(trimmed.replace(LIST_PREFIX, ""));
+  const name = normalizeName(sanitizePlayerName(trimmed.replace(LIST_PREFIX, "")));
   if (!name || name.length < 2) return null;
 
-  return { name, overseas, isCaptain, isWicketkeeper, role, notes };
+  return { name, overseas, isNew, isCaptain, isWicketkeeper, role, notes };
 }
 
 function parseBowlingQuotaLine(line: string): { name: string; overs: number[] } | null {
   const trimmed = line.trim();
   if (!trimmed) return null;
 
-  const match = trimmed.match(/^(.+?)\s*[:\(]?\s*([\d,\s]+)\)?$/);
+  let match =
+    trimmed.match(/^(.+?)\s*[:\-]\s*([\d,\s]+)\s*overs?\s*$/i) ??
+    trimmed.match(/^(.+?)\s*[:(]\s*([\d,\s]+)\)?\s*$/);
   if (!match) return null;
 
-  const name = match[1].replace(/[:\(]+$/, "").trim();
-  const oversStr = match[2];
-  const overs = oversStr
+  const name = sanitizePlayerName(match[1]);
+  const overs = match[2]
     .split(/[,\s]+/)
     .map((s) => parseInt(s.trim(), 10))
     .filter((n) => !Number.isNaN(n) && n > 0);
 
   if (!name || overs.length === 0) return null;
-  return { name: normalizeName(name), overs };
+  return { name, overs };
 }
 
 function extractTeamName(headerLine: string): string {
@@ -101,7 +105,7 @@ export function parseTeamSheet(text: string, fallbackName?: string): ParseResult
     if (/^impact\s*(player)?\s*[:\-]/i.test(line)) {
       section = "impact";
       const impactText = line.replace(/^impact\s*(player)?\s*[:\-]\s*/i, "");
-      const parsed = parsePlayerLine(impactText) || { name: normalizeName(impactText), overseas: OVERSEAS_MARKERS.test(impactText), isCaptain: false, isWicketkeeper: false, role: "unknown" as const, notes: "" };
+      const parsed = parsePlayerLine(impactText) || { name: normalizeName(impactText), overseas: OVERSEAS_MARKERS.test(impactText), isNew: /\(new\)|debut|uncapped/i.test(impactText), isCaptain: false, isWicketkeeper: false, role: "unknown" as const, notes: "" };
       let notes = parsed.notes;
       if (/bowling/i.test(impactText)) notes = "bowling only";
       if (/batting/i.test(impactText)) notes = "batting only";
@@ -149,11 +153,16 @@ export function parseTeamSheet(text: string, fallbackName?: string): ParseResult
 
   const team: ParsedTeam = {
     name: teamName,
-    playingXI,
-    captain,
-    wicketkeeper,
-    impactPlayer,
-    bowlingQuota,
+    playingXI: playingXI.map((p) => ({ ...p, name: sanitizePlayerName(p.name) })),
+    captain: captain ? sanitizePlayerName(captain) : undefined,
+    wicketkeeper: wicketkeeper ? sanitizePlayerName(wicketkeeper) : undefined,
+    impactPlayer: impactPlayer
+      ? { ...impactPlayer, name: sanitizePlayerName(impactPlayer.name) }
+      : undefined,
+    bowlingQuota: bowlingQuota.map((q) => ({
+      name: sanitizePlayerName(q.name),
+      overs: q.overs,
+    })),
   };
 
   return { team, errors, warnings };

@@ -1,5 +1,6 @@
 import type { MatchResult, ParsedTeam } from "./matchSchema";
 import { rebuildPartnershipsAndFow, syncBoundaries, notOutsForWickets } from "./matchSquadEnricher";
+import { sanitizePlayerName, sanitizeDismissalStatus } from "./playerNames";
 
 function isNotOut(status: string): boolean {
   return /not out/i.test(status);
@@ -31,6 +32,8 @@ export function repairMatchStats(match: MatchResult, matchOvers: number): MatchR
 
   for (const inn of repaired.innings) {
     for (const b of inn.batting) {
+      b.name = sanitizePlayerName(b.name);
+      b.status = sanitizeDismissalStatus(b.status);
       if (/^dismissed$/i.test(b.status.trim())) {
         b.status = "b Bowler";
       }
@@ -39,6 +42,9 @@ export function repairMatchStats(match: MatchResult, matchOvers: number): MatchR
         const fixed = syncBoundaries(b.runs, () => 0.5);
         b.fours = fixed.fours;
         b.sixes = fixed.sixes;
+      }
+      if (b.runs === 0) {
+        b.balls = Math.min(b.balls, 3);
       }
       if (b.balls > 0) {
         b.strikeRate = Math.round((b.runs / b.balls) * 1000) / 10;
@@ -90,6 +96,12 @@ export function repairMatchStats(match: MatchResult, matchOvers: number): MatchR
     }
 
     inn.runRate = inn.overs > 0 ? Math.round((inn.totalRuns / inn.overs) * 100) / 100 : 0;
+
+    if (inn.bowling?.length) {
+      for (const bw of inn.bowling) {
+        bw.name = sanitizePlayerName(bw.name);
+      }
+    }
   }
 
   const [inn1, inn2] = repaired.innings;

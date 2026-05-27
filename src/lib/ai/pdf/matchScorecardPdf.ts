@@ -43,18 +43,18 @@ function drawTopBanner(doc: PDFDoc, pageNum: number, totalPages: number, subtitl
 
 function drawSectionTitle(doc: PDFDoc, title: string) {
   const y = doc.y;
-  doc.rect(MARGIN, y, TABLE_W, 20).fill(IPL_BLUE);
-  doc.fillColor("#FFFFFF").font("Helvetica-Bold").fontSize(9)
-    .text(title.toUpperCase(), MARGIN + 8, y + 6);
-  doc.y = y + 22;
+  doc.rect(MARGIN, y, TABLE_W, 22).fill(IPL_BLUE);
+  doc.fillColor("#FFFFFF").font("Helvetica-Bold").fontSize(10)
+    .text(title.toUpperCase(), MARGIN + 8, y + 7);
+  doc.y = y + 26;
 }
 
 function drawTable(doc: PDFDoc, cols: Col[], rows: string[][], header = true) {
   let y = doc.y;
   let x = MARGIN;
-  const rowH = 15;
-  const headerH = header ? 18 : 0;
-  const tableH = headerH + rows.length * rowH + 6;
+  const rowH = 17;
+  const headerH = header ? 20 : 0;
+  const tableH = headerH + rows.length * rowH + 8;
 
   if (y + tableH > PAGE_BOTTOM) {
     doc.addPage();
@@ -63,13 +63,13 @@ function drawTable(doc: PDFDoc, cols: Col[], rows: string[][], header = true) {
   }
 
   if (header) {
-    doc.rect(MARGIN, y, TABLE_W, 18).fill("#E8E8E8");
-    doc.fillColor(TEXT).font("Helvetica-Bold").fontSize(7.5);
+    doc.rect(MARGIN, y, TABLE_W, 20).fill("#E8E8E8");
+    doc.fillColor(TEXT).font("Helvetica-Bold").fontSize(8);
     for (const col of cols) {
-      doc.text(col.label, x + 3, y + 5, { width: col.width - 6, align: col.align || "left" });
+      doc.text(col.label, x + 4, y + 6, { width: col.width - 8, align: col.align || "left" });
       x += col.width;
     }
-    y += 18;
+    y += 20;
   }
 
   rows.forEach((row, ri) => {
@@ -78,21 +78,21 @@ function drawTable(doc: PDFDoc, cols: Col[], rows: string[][], header = true) {
       y = 62;
     }
     x = MARGIN;
-    if (ri % 2 === 1) doc.rect(MARGIN, y, TABLE_W, 15).fill(ROW_ALT);
-    doc.rect(MARGIN, y, TABLE_W, 15).strokeColor(BORDER).lineWidth(0.5).stroke();
-    doc.fillColor(TEXT).font("Helvetica").fontSize(7.5);
+    if (ri % 2 === 1) doc.rect(MARGIN, y, TABLE_W, rowH).fill(ROW_ALT);
+    doc.rect(MARGIN, y, TABLE_W, rowH).strokeColor(BORDER).lineWidth(0.5).stroke();
+    doc.fillColor(TEXT).font("Helvetica").fontSize(8);
     row.forEach((cell, ci) => {
-      doc.text(cell, x + 3, y + 4, {
-        width: cols[ci].width - 6,
+      doc.text(cell, x + 4, y + 5, {
+        width: cols[ci].width - 8,
         align: cols[ci].align || "left",
         lineBreak: false,
       });
       x += cols[ci].width;
     });
-    y += 15;
+    y += rowH;
   });
 
-  doc.y = y + 6;
+  doc.y = y + 10;
 }
 
 const BAT_COLS: Col[] = [

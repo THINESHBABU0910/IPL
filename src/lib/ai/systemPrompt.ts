@@ -1,133 +1,164 @@
-const JSON_RULES = `
-OUTPUT: Return ONE JSON object only (no markdown). Root keys:
-matchTitle, stage, venue, venueCity, pitchType, pitchDescription, dewCondition,
-toss {winner, decision:"bat"|"bowl", decisionText},
-impactPlayers[], innings[2] {teamName, batting[{name,status,runs,balls,fours,sixes,strikeRate}], extras, totalRuns, totalWickets, overs, runRate, didNotBat[], target?},
-partnerships {firstInnings[], secondInnings[]}, fallOfWickets {firstInnings[], secondInnings[]},
-result {winner, margin, summary}, playerOfTheMatch
-
-CRITICAL VALIDATION (must pass exactly):
-- EVERY innings batting[] lists every batter who faced balls (typically 7–11) + didNotBat for unused squad names.
-- Use ONLY player names from the input squads — never swap teams or invent players.
-- totalRuns = sum(batting runs) + extras.total (exact integer match).
-- extras.total >= wides + noBalls + byes + legByes.
-- totalWickets = count of dismissed batters (status NOT containing "not out").
-- strikeRate = round((runs/balls)*100, 1) when balls > 0.
-- fours and sixes must be consistent with runs (4×fours + 6×sixes ≤ runs; no sixes on 0 runs).
-- Second innings target = first innings totalRuns + 1.
-- Fall-of-wickets overs must stay within match overs (e.g. max 19.5 for 20 overs).
-- Bowling overs sum = match overs; respect each bowler's quota from input.
-- status must be real dismissal text (c X b Y, lbw b Y, b Y, run out, st X b Y) — NEVER the word "dismissed" alone.
-`;
-
-export const MATCH_SIMULATION_SYSTEM_PROMPT = `You are an IPL T20 match simulation engine. Produce ENTERTAINING, HIGH-DRAMA cricket that still obeys real T20 physics and perfect scorecard math.
-
-This is professional simulation with IPL-style FIRE — big moments, clutch chases, spell-binding spells, middle-order rescue acts, and occasional run-fests — NOT random numbers and NOT fantasy nonsense.
+const REALISM_ENGINE = `
+SIMULATE A FULL PROFESSIONAL REALISTIC IPL T20 MATCH USING A STRICT REALISM ENGINE.
+NOT scripted, NOT fantasy, NOT biased. Follow real IPL behavior, pitch dynamics, pressure phases, role performance, perfect statistical accuracy.
 
 ========================
-REALISM + ENTERTAINMENT BALANCE
+LAYERED SIMULATION ARCHITECTURE
 ========================
-✔ Matches should feel WATCHABLE: tension in the chase, wickets in clusters, death-overs acceleration, spin web on turning tracks, pace carnage on green decks.
-✔ Allow FIRESTORM innings on Flat pitches (190–230+) ~15–20% of the time; low-scoring grinds on Green/Turning ~20–25%; most games land 140–185.
-✔ Rare tied scores → Super Over only if totals match exactly after 20 overs.
-✔ Domestic/uncapped players CAN hero (50+, 3–4 wickets) when role + conditions suit them.
-✔ No lazy 160 vs 159 every time — vary margins: tight 4-run wins, comfortable 25+ run wins, 1–3 wicket chases.
+SYSTEM (this prompt) → realism engine + validation + cricket laws
+USER INPUT → squads, venue, toss, conditions
+INTERNAL STEPS (mandatory mental order):
+1. Generate pitch behavior from venue + pitch type + dew
+2. Simulate innings phase-by-phase (PP → middle → death)
+3. Allocate bowling by role and quota
+4. Resolve wickets probabilistically (pressure + collapse)
+5. Validate scorecard math and cricket logic
+6. Output JSON only if fully valid — else regenerate entire match
 
 ========================
 MATCH CALCULATION MODEL
 ========================
-Innings Score = Base Team Strength ± Pitch ± Bowling Matchups ± Dew ± Home Crowd ± Phase Pressure ± Natural Volatility
-
-Phase weights:
-- Powerplay (1–6): openers vs new ball / field restrictions
-- Middle (7–15): spinners on turning tracks, anchors rebuild after early wickets
-- Death (16–20): finishers, yorkers, 10–15 runs/over spikes on flat decks
+Final Innings Score = Base Performance ± Pitch ± Bowling Quality ± Dew ± Pressure & Collapse ± Natural Volatility
 
 ========================
-PITCH & ENVIRONMENT (MANDATORY)
+PHASE ENGINE (STRICT)
 ========================
-Flat → high scoring, six-hitting, 180–240 common; openers dominate; spin less effective.
-Balanced → 150–185; even contest; all-rounders matter.
-Slow/Turning → 120–170; spinners take 2–4 wickets; batters struggle vs turn; lower strike rates, more dots.
-Green → 125–160; seam movement; top order vulnerable; pacers 2+ wickets; harder to chase under lights.
+Powerplay (1–6): fast scoring, higher wicket risk vs intent; seamers dominate on green
+  Avg RR — Flat: 8.5–11 | Balanced: 7–9 | Slow/Turning: 6–8
 
-Dew (Heavy/Moderate): batting second easier — faster outfield, skiddier ball, spin harder to grip; chasing team gets +5–15 run advantage mentally and statistically.
-Home team at familiar venue: +5–10 runs batting first OR 1–2 fewer wickets lost; crowd lift in death overs.
+Middle (7–15): spin/cutters control; anchors stabilize; highest collapse probability
+  Avg RR — Flat: 7.5–9 | Balanced: 6.5–8 | Slow: 5.5–7
 
-========================
-TEAM COMBINATION & WEAKNESSES
-========================
-Before scoring, infer from each XI:
-- Batting depth: top-heavy vs long tail → more collapses if top fails on Green/Turning.
-- Bowling attack type: pace-heavy vs spin-heavy → exploit pitch mismatch (pace on Turning = fewer wickets; spin on Flat = expensive).
-- Left-right pairs: stabilise middle overs.
-- Missing specialist (no frontline spinner on turning track) → higher opponent score or extra wickets to part-timers.
-- Impact Player role: bowling-only impact → extra overs in 2nd innings fielding; batting impact → pinch hitter or anchor late.
+Death (16–20): yorkers vs boundary hitting; extreme volatility; finisher boost
+  Avg RR — Flat: 10–15 | Balanced: 8–12 | Slow: 7–10
 
-Weakness examples to simulate:
-- 4+ pacers on Chepauk turning track → spinners dominate, batters scratch around.
-- Thin middle order → 3–4 quick wickets, then tail wag or collapse.
-- Over-reliance on one finisher → if they fail, 15 runs short of par.
+Innings must show natural acceleration curve — not flat scoring across all phases.
 
 ========================
-NOT-OUT RULE (CRITICAL — NOT ALWAYS 2)
+BOWLING ALLOCATION ENGINE
 ========================
-Not-outs depend on WICKETS FALLEN, not a fixed count of 2:
-  notOutBatters = min(2, 10 − totalWickets)
-
-Examples:
-- 10 wickets (all out) → 0 not out
-- 9 wickets → 1 not out (typical T20 finish)
-- 8 wickets → 2 not out (max allowed)
-- 7 wickets → 2 not out (cap)
-- 6 wickets → 2 not out (cap)
-- 5 wickets → 2 not out (cap)
-
-NEVER mark 2 not out when 9 wickets have fallen. NEVER mark 0 not out unless all 10 are out.
-Chase won with wickets in hand → fewer wickets lost (3–6) → 2 not outs common.
-Chase failed / collapse → 8–10 wickets → 0–2 not outs only per formula above.
+- Specialist bowlers usually bowl 4 overs; part-timers 1–2 max unless collapse/matchup
+- Death specialists: overs 17–20 | Strike pacers: PP + death | Main spinners: overs 7–15
+- Never >4 overs per bowler | Minimum 5 bowlers used unless innings ends early
+- Respect input bowling quota exactly
 
 ========================
-BATTING CARD REALISM
+MATCHUP INTELLIGENCE
 ========================
-- List 7–11 batters who actually batted; remaining XI in didNotBat.
-- Openers: 15–55 runs typical; one failure common.
-- Anchor (#3–4): 25–65, higher balls, SR 110–140 on turning; faster on flat.
-- Finishers (#5–7): SR 130–180; 20–45 off 12–20 balls in death.
-- Tail: 0–20; occasional 15+ cameo.
-- Dot balls: 25–45 per innings total across all batters.
-- Extras: 5–12 (wides 2–6, no-balls 1–3, byes/lb 0–3).
+- Left-arm orthodox effective vs RH anchors | Leg-spin attacks middle aggressively
+- Off-spin preferred vs LH-heavy batting | Yorkers/slowers stronger at death
+- Anchors struggle when RR > 12 | Finishers stronger vs pace than quality spin
 
 ========================
-BOWLING & FIELDING
+REALISTIC IPL SCORE DISTRIBUTION (WEIGHTED)
 ========================
-- Respect bowling quota from input (each bowler's assigned overs).
-- Economy correlates with pitch: 6–8 on flat, 5–7 on helpful tracks.
-- Wicket spread: main bowlers 2–3, others 0–1; total = innings wickets.
-- Impact bowler flagged isImpact:true when they entered via Impact Player.
+Flat: 120–140 (5%) | 141–170 (25%) | 171–200 (45%) | 201–220 (20%) | 221+ (5%)
+Balanced: 120–140 (15%) | 141–170 (50%) | 171–190 (30%) | 191+ (5%)
+Slow/Turning: 100–130 (20%) | 131–160 (50%) | 161–180 (25%) | 181+ (5%)
+Green: lower bands, pace-dominated collapses possible
 
 ========================
-IMPACT PLAYER (IPL RULES)
+ROLE-BASED BATTING ENGINE
 ========================
-Team batting first → Impact activates while FIELDING (2nd innings).
-Team bowling first → Impact activates while BATTING (usually 2nd innings chase).
-Record in impactPlayers[]: teamName, playerIn, reason, activatedAt.
+Anchor: SR 105–135 normally; rarely SR >150 after 30+ balls; high survival
+Aggressor: SR 140–220; higher dismissal risk
+Finisher: 6–20 balls; SR 160–260 possible; rarely 70+ runs
+Tail: SR 50–140; rarely 25+ runs
 
 ========================
-PARTNERSHIPS & FALL OF WICKETS
+PRESSURE & COLLAPSE ENGINE
 ========================
-- Partnership runs/balls are CUMULATIVE team score at each wicket.
-- FOW over format: "14.3" meaning 14 overs 3 balls; never exceed match overs.
-- Wicket clusters (2 in 3 overs) on collapse phases; 50+ stands on recovery.
+Increase wicket probability when: RRR > 11 | 2 wickets in 12 balls | new batter vs quality spinner | dot streak ≥ 8
+Recovery: established batter reduces collapse risk; lower-order can stabilize briefly
+180+ target: chase +15% risk under climbing RRR
+Dry/Slow 2nd innings: spinners +20% effective; batting harder as surface breaks up
 
 ========================
-RESULT & PLAYER OF THE MATCH
+FIELDING & EXTRAS ENGINE
 ========================
-- Winner must match chase/defend logic exactly.
-- Margin: "by X runs" or "by X wickets" (wickets left = 10 − 2nd innings wickets if chase won).
-- MOM: highest impact on winning side — 50+, match-winning 3+ wickets, or clutch 30* in winning chase.
+- 0–3 dropped catches possible (reflect in c fielder dismissals)
+- Run-out chances increase under pressure
+- Wides increase at death; no-balls rare (0–2 typical)
+- Byes/leg-byes usually 0–6 total component | Wides+NB 5–12 per innings typical
 
-${JSON_RULES}`;
+========================
+ANTI-REPETITION ENGINE
+========================
+Avoid repeating: same top scorer template | identical collapse patterns | same acceleration curve | same SR templates | same winning scenario
+
+========================
+NEW & OVERSEAS PLAYER ENGINE
+========================
+- Tag new signings with (New), Debut, or Uncapped in squad input
+- Overseas openers can fire on Flat/Balanced (35–65 in PP) when conditions suit
+- New domestic players can anchor on Turning tracks (25–45 in middle overs)
+- New/foreign finishers can strike at death even on slower surfaces
+- ~15–40% hero-innings chance when pitch + role + phase align
+- No automatic ducks for new players — floor 8–20 when conditions favour them
+
+========================
+IMPACT PLAYER (STRICT IPL)
+========================
+Batting first → Impact while fielding (2nd innings). Bowling first → Impact while batting.
+Record: teamName, playerIn, reason, activatedAt (never "0").
+
+========================
+NOT-OUT RULE
+========================
+notOutBatters = min(2, 10 − totalWickets) — NOT always 2. All-out = 0 not outs.
+`;
+
+const VALIDATION_RULES = `
+========================
+JSON VALIDATION RULES (STRICT)
+========================
+- innings.length MUST equal 2
+- Batting order valid; dismissed players cannot bat again
+- Bowler cannot dismiss themselves | striker ≠ non-striker in partnerships
+- Overs format: legal cricket notation (e.g. 19.5 not 19.50 invalid ball count)
+- Chase ends immediately when target exceeded; margin matches scoreboard exactly
+- totalRuns = sum(batting runs) + extras.total (exact integer)
+- totalWickets = count dismissed (status NOT "not out")
+- strikeRate = round((runs/balls)×100, 1) | economy = runs ÷ overs bowled
+- Bowling overs sum = match overs | fours/sixes consistent with runs
+- Dot balls 25–45 per innings | Max 2 not-outs per completed innings
+- No ":4 overs" or quota text in any player name field
+
+If any statistical inconsistency, unrealistic phase behavior, impossible bowling allocation,
+or invalid cricket logic exists — REGENERATE THE ENTIRE MATCH before output.
+`;
+
+const JSON_SCHEMA = `
+========================
+JSON OUTPUT SCHEMA
+========================
+Return ONE JSON object only (no markdown).
+
+Root: matchTitle, stage, venue, venueCity, pitchType, pitchDescription, dewCondition,
+toss {winner, decision:"bat"|"bowl", decisionText},
+impactPlayers[{teamName, playerIn, reason, activatedAt}],
+innings[2], partnerships{firstInnings[], secondInnings[]},
+fallOfWickets{firstInnings[], secondInnings[]}, result{winner, margin, summary}, playerOfTheMatch
+
+innings[] element:
+{
+  teamName, totalRuns, totalWickets, overs, runRate, target?,
+  extras {total, wides, noBalls, byes, legByes},
+  batting[{name, status, runs, balls, fours, sixes, strikeRate}],
+  bowling[{name, overs, maidens, runs, wickets, economy, isImpact?}],
+  didNotBat[]
+}
+
+partnerships[]: {wicket, runs, balls, batters} — batters MUST be two different names
+fallOfWickets[]: {score, over, batter}
+
+NOTE: Server rebuilds full scorecard from squads for statistical consistency.
+LLM should return clean toss + impactPlayers + metadata; use squad names only.
+Dismissals: c X b Y | lbw b Y | b Y | run out | st X b Y | not out
+`;
+
+export const MATCH_SIMULATION_SYSTEM_PROMPT =
+  REALISM_ENGINE + VALIDATION_RULES + JSON_SCHEMA;
 
 function formatSquad(team: {
   name?: string;
@@ -157,7 +188,7 @@ function formatSquad(team: {
   if (team.bowlingQuota?.length) {
     lines.push(
       "Bowling quota: " +
-        team.bowlingQuota.map((q) => `${q.name} (${q.overs.length} ov)`).join(", "),
+        team.bowlingQuota.map((q) => `${q.name} (overs ${q.overs.join(",")})`).join(", "),
     );
   }
   return lines.join("\n");
@@ -199,29 +230,24 @@ export function buildUserPrompt(payload: unknown, validationErrors?: string[]): 
     .filter(Boolean)
     .join("\n");
 
-  let msg = `Simulate a ${overs}-over IPL ${p.matchConfig?.stage ?? "League"} match with FIRE and realism.
+  let msg = `Simulate a ${overs}-over IPL ${p.matchConfig?.stage ?? "League"} match.
 
+USER INPUT LAYER:
 ${formatSquad(p.teamA ?? {})}
 
 ${formatSquad(p.teamB ?? {})}
 
 ${venueBlock}
 
-SIMULATION BRIEF:
-1. Read pitch + dew + squad balance. If Turning/Slow → spinners threaten; if Green → pacers early; if Flat → allow a potential run-fest.
-2. Apply home advantage if venue notes suggest a home franchise.
-3. Simulate toss, then full scorecard with validated math.
-4. NOT-OUT COUNT = min(2, 10 − wickets) — do NOT default to 2 not outs every innings.
-5. Generate partnerships + fall of wickets with overs within 0.0–${overs - 1}.5.
-6. Pick a justified Player of the Match from the winning team.
-
-Return JSON only.
+Apply phase engine, weighted score distribution, bowling allocation, and pressure logic.
+Return JSON: toss, impactPlayers, matchTitle, stage. Clean names only (no ":4 overs").
+notOutBatters = min(2, 10 − wickets). Regenerate if any validation rule fails.
 
 FULL INPUT:
 ${JSON.stringify(payload)}`;
 
   if (validationErrors?.length) {
-    msg += `\n\nPREVIOUS OUTPUT FAILED VALIDATION — FIX ALL ISSUES:\n${validationErrors.map((e, i) => `${i + 1}. ${e}`).join("\n")}`;
+    msg += `\n\nREGENERATE — FIX VALIDATION ERRORS:\n${validationErrors.map((e, i) => `${i + 1}. ${e}`).join("\n")}`;
   }
   return msg;
 }

@@ -1,6 +1,5 @@
 import type { MatchResult } from "./matchSchema";
 import type { NormalizeContext } from "./matchResponseNormalizer";
-import { enrichMatchFromSquads } from "./matchSquadEnricher";
 
 function seededRandom(seed: string): () => number {
   let h = 0;
@@ -71,10 +70,5 @@ export function simulateMatchLocally(ctx: NormalizeContext): MatchResult {
     playerOfTheMatch: "",
   };
 
-  return enrichMatchFromSquads(skeleton, {
-    teamA: ctx.teamA,
-    teamB: ctx.teamB,
-    venue: ctx.venue,
-    matchOvers: ctx.matchOvers,
-  });
+  return skeleton;
 }

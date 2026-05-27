@@ -111,6 +111,7 @@ export const ParsedPlayerSchema = z.object({
   overseas: z.boolean().default(false),
   isCaptain: z.boolean().default(false),
   isWicketkeeper: z.boolean().default(false),
+  isNew: z.boolean().default(false),
   role: z.enum(["batter", "bowler", "allrounder", "wicketkeeper", "unknown"]).default("unknown"),
   notes: z.string().default("full match"),
 });
@@ -118,6 +119,7 @@ export const ParsedPlayerSchema = z.object({
 export const ParsedImpactSchema = z.object({
   name: z.string(),
   overseas: z.boolean().default(false),
+  isNew: z.boolean().default(false),
   notes: z.string().default(""),
 });
 

@@ -14,7 +14,9 @@ import {
 import { normalizeMatchResponse, parseJsonLoose } from "@/lib/ai/matchResponseNormalizer";
 import { enrichMatchFromSquads } from "@/lib/ai/matchSquadEnricher";
 import { simulateMatchLocally } from "@/lib/ai/localMatchSimulator";
+import { polishMatchResult } from "@/lib/ai/matchPolish";
 import { generateMatchScorecardPdf, buildPdfFileName } from "@/lib/ai/pdf/matchScorecardPdf";
+import type { MatchResult, ParsedTeam } from "@/lib/ai/matchSchema";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -23,20 +25,35 @@ export const maxDuration = 60;
 
 const MAX_LLM_ATTEMPTS = 2;
 
-function finalizeMatch(
-  parsedMatch: ReturnType<typeof MatchResultSchema.parse>,
+type NormalizeCtx = {
+  teamA: ParsedTeam;
+  teamB: ParsedTeam;
+  venue: ReturnType<typeof getVenueById>;
+  matchOvers: number;
+  stage: string;
+};
+
+function buildFinalMatch(
+  skeleton: MatchResult,
+  ctx: NormalizeCtx,
   matchOvers: number,
-) {
-  return repairMatchStats(parsedMatch, matchOvers);
+  teamA: ParsedTeam,
+  teamB: ParsedTeam,
+): MatchResult {
+  let match = enrichMatchFromSquads(skeleton, {
+    teamA: ctx.teamA,
+    teamB: ctx.teamB,
+    venue: ctx.venue!,
+    matchOvers,
+  });
+  match = repairMatchStats(match, matchOvers);
+  match = polishMatchResult(match, matchOvers);
+  return enrichMatchWithBowling(match, teamA, teamB);
 }
 
-function runLocalSimulation(
-  normalizeCtx: Parameters<typeof simulateMatchLocally>[0],
-  matchOvers: number,
-) {
-  let match = simulateMatchLocally(normalizeCtx);
-  match = finalizeMatch(MatchResultSchema.parse(match), matchOvers);
-  return enrichMatchWithBowling(match, normalizeCtx.teamA, normalizeCtx.teamB);
+function runLocalSimulation(ctx: NormalizeCtx, matchOvers: number) {
+  const skeleton = MatchResultSchema.parse(simulateMatchLocally(ctx));
+  return buildFinalMatch(skeleton, ctx, matchOvers, ctx.teamA, ctx.teamB);
 }
 
 export async function POST(req: NextRequest) {
@@ -130,18 +147,23 @@ export async function POST(req: NextRequest) {
           const jsonStr = extractJsonFromResponse(content);
           const raw = parseJsonLoose(jsonStr);
           const normalized = normalizeMatchResponse(raw, normalizeCtx);
-          let parsedMatch = MatchResultSchema.parse(normalized);
-          parsedMatch = enrichMatchFromSquads(parsedMatch, normalizeCtx);
-          parsedMatch = finalizeMatch(parsedMatch, matchOvers);
+          const llmSkeleton = MatchResultSchema.parse(normalized);
+          const built = buildFinalMatch(
+            llmSkeleton,
+            normalizeCtx,
+            matchOvers,
+            parsed.teamA,
+            parsed.teamB,
+          );
 
           const statErrors = validateMatchResult(
-            parsedMatch,
+            built,
             matchOvers,
             parsed.teamA,
             parsed.teamB,
           );
           const quotaErrors = validateBowlingFromQuota(
-            parsedMatch,
+            built,
             parsed.teamA,
             parsed.teamB,
             matchOvers,
@@ -149,7 +171,7 @@ export async function POST(req: NextRequest) {
           validationErrors = [...statErrors, ...quotaErrors];
 
           if (validationErrors.length === 0) {
-            matchResult = enrichMatchWithBowling(parsedMatch, parsed.teamA, parsed.teamB);
+            matchResult = built;
             simulationMode = "llm";
             break;
           }
