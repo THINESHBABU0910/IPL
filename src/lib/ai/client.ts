@@ -1,12 +1,5 @@
 import { MATCH_SIMULATION_SYSTEM_PROMPT } from "./systemPrompt";
 
-/** Hardcoded Sify AI Gateway credentials (as requested) */
-const SIFY_CONFIG = {
-  baseUrl: "https://aigateway-uat.sifymdp.digital/api/v1",
-  apiKey: "sk-gw-6_uV9fOAN1UHElhEhFegjtQtdEdxVfi0Xxy6CkTxzuE",
-  model: "meta-llama/Llama-3.1-8B-Instruct",
-} as const;
-
 /** Llama context — keep completion budget small so gateway responds before nginx timeout */
 const MODEL_CONTEXT_LIMIT = 131072;
 const TOKEN_SAFETY_BUFFER = 2048;
@@ -38,13 +31,13 @@ export interface ChatMessage {
   content: string;
 }
 
-export interface SifyCompletionOptions {
+export interface ChatCompletionOptions {
   messages: ChatMessage[];
   temperature?: number;
   maxTokens?: number;
 }
 
-export interface SifyCompletionResult {
+export interface ChatCompletionResult {
   content: string;
   usage?: {
     prompt_tokens: number;
@@ -54,14 +47,27 @@ export interface SifyCompletionResult {
 }
 
 function getConfig() {
+  const baseUrl = process.env.AI_GATEWAY_BASE_URL?.trim();
+  const apiKey = process.env.AI_GATEWAY_API_KEY?.trim();
+  const model = process.env.AI_GATEWAY_MODEL?.trim();
+
+  if (!baseUrl || !apiKey || !model) {
+    const missing = [
+      !baseUrl && "AI_GATEWAY_BASE_URL",
+      !apiKey && "AI_GATEWAY_API_KEY",
+      !model && "AI_GATEWAY_MODEL",
+    ].filter(Boolean);
+    throw new Error(`Missing AI Gateway env vars: ${missing.join(", ")}`);
+  }
+
   return {
-    baseUrl: SIFY_CONFIG.baseUrl.replace(/\/$/, ""),
-    apiKey: SIFY_CONFIG.apiKey,
-    model: SIFY_CONFIG.model,
+    baseUrl: baseUrl.replace(/\/$/, ""),
+    apiKey,
+    model,
   };
 }
 
-export async function callSifyChat(options: SifyCompletionOptions): Promise<SifyCompletionResult> {
+export async function callChatCompletion(options: ChatCompletionOptions): Promise<ChatCompletionResult> {
   const { baseUrl, apiKey, model } = getConfig();
   const maxTokens = options.maxTokens ?? computeMaxCompletionTokens(options.messages);
 
@@ -104,7 +110,7 @@ export async function callSifyChat(options: SifyCompletionOptions): Promise<Sify
 
   const data = (await res.json()) as {
     choices?: { message?: { content?: string } }[];
-    usage?: SifyCompletionResult["usage"];
+    usage?: ChatCompletionResult["usage"];
   };
 
   const content = data.choices?.[0]?.message?.content?.trim();
@@ -116,7 +122,7 @@ export async function callSifyChat(options: SifyCompletionOptions): Promise<Sify
 export async function simulateMatchJson(
   userPrompt: string,
   validationErrors?: string[],
-): Promise<SifyCompletionResult> {
+): Promise<ChatCompletionResult> {
   const messages: ChatMessage[] = [
     { role: "system", content: MATCH_SIMULATION_SYSTEM_PROMPT },
     { role: "user", content: userPrompt },
@@ -129,7 +135,7 @@ export async function simulateMatchJson(
     });
   }
 
-  return callSifyChat({ messages, temperature: 0.75 });
+  return callChatCompletion({ messages, temperature: 0.75 });
 }
 
 /** Extract JSON object from LLM response (handles accidental markdown fences) */

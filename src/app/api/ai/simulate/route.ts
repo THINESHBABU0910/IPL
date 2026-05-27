@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "crypto";
 import { parseBothTeams } from "@/lib/ai/teamInputParser";
 import { getVenueById } from "@/data/iplVenues";
-import { simulateMatchJson, extractJsonFromResponse, isLlmSimulationDisabled } from "@/lib/ai/sifyClient";
+import { simulateMatchJson, extractJsonFromResponse, isLlmSimulationDisabled } from "@/lib/ai/client";
 import { buildUserPrompt } from "@/lib/ai/systemPrompt";
 import { MatchResultSchema } from "@/lib/ai/matchSchema";
 import {
@@ -11,7 +11,7 @@ import {
   enrichMatchWithBowling,
   repairMatchStats,
 } from "@/lib/ai/matchValidator";
-import { normalizeMatchResponse, parseJsonLoose } from "@/lib/ai/matchResponseNormalizer";
+import { normalizeMatchResponse, parseJsonLoose, type NormalizeContext } from "@/lib/ai/matchResponseNormalizer";
 import { enrichMatchFromSquads } from "@/lib/ai/matchSquadEnricher";
 import { simulateMatchLocally } from "@/lib/ai/localMatchSimulator";
 import { polishMatchResult } from "@/lib/ai/matchPolish";
@@ -25,17 +25,9 @@ export const maxDuration = 60;
 
 const MAX_LLM_ATTEMPTS = 2;
 
-type NormalizeCtx = {
-  teamA: ParsedTeam;
-  teamB: ParsedTeam;
-  venue: ReturnType<typeof getVenueById>;
-  matchOvers: number;
-  stage: string;
-};
-
 function buildFinalMatch(
   skeleton: MatchResult,
-  ctx: NormalizeCtx,
+  ctx: NormalizeContext,
   matchOvers: number,
   teamA: ParsedTeam,
   teamB: ParsedTeam,
@@ -43,7 +35,7 @@ function buildFinalMatch(
   let match = enrichMatchFromSquads(skeleton, {
     teamA: ctx.teamA,
     teamB: ctx.teamB,
-    venue: ctx.venue!,
+    venue: ctx.venue,
     matchOvers,
   });
   match = repairMatchStats(match, matchOvers);
@@ -51,7 +43,7 @@ function buildFinalMatch(
   return enrichMatchWithBowling(match, teamA, teamB);
 }
 
-function runLocalSimulation(ctx: NormalizeCtx, matchOvers: number) {
+function runLocalSimulation(ctx: NormalizeContext, matchOvers: number) {
   const skeleton = MatchResultSchema.parse(simulateMatchLocally(ctx));
   return buildFinalMatch(skeleton, ctx, matchOvers, ctx.teamA, ctx.teamB);
 }

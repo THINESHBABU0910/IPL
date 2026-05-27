@@ -109,7 +109,7 @@ export function parseTeamSheet(text: string, fallbackName?: string): ParseResult
       let notes = parsed.notes;
       if (/bowling/i.test(impactText)) notes = "bowling only";
       if (/batting/i.test(impactText)) notes = "batting only";
-      impactPlayer = { name: parsed.name, overseas: parsed.overseas, notes };
+      impactPlayer = { name: parsed.name, overseas: parsed.overseas, isNew: parsed.isNew, notes };
       continue;
     }
 
@@ -134,7 +134,12 @@ export function parseTeamSheet(text: string, fallbackName?: string): ParseResult
     if (section === "impact") {
       const parsed = parsePlayerLine(line);
       if (parsed) {
-        impactPlayer = { name: parsed.name, overseas: parsed.overseas, notes: parsed.notes };
+        impactPlayer = {
+          name: parsed.name,
+          overseas: parsed.overseas,
+          isNew: parsed.isNew,
+          notes: parsed.notes,
+        };
       }
       continue;
     }
