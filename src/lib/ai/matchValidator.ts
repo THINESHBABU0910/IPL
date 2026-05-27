@@ -7,6 +7,8 @@ import {
   economySpread,
   type BuildBowlingContext,
 } from "./bowlingFigures";
+import { syncAllDismissals, validateFallOfWickets } from "./dismissalSync";
+import { polishMatchResult } from "./matchPolish";
 
 function isNotOut(status: string): boolean {
   return /not out/i.test(status);
@@ -197,18 +199,43 @@ export function ensureMatchReadyForPdf(
   matchOvers: number,
   boundarySize?: string,
 ): MatchResult {
-  let current = rebuildBowlingForMatch(match, teamA, teamB, pitchType, matchOvers, boundarySize, "init");
-  for (let pass = 0; pass < 2; pass++) {
+  let current: MatchResult = {
+    ...match,
+    innings: match.innings.map((inn) => ({
+      ...inn,
+      batting: inn.batting.map((b) => ({ ...b })),
+      extras: { ...inn.extras },
+    })) as MatchResult["innings"],
+  };
+
+  for (let pass = 0; pass < 3; pass++) {
     current = repairMatchStats(current, matchOvers);
-    current = rebuildBowlingForMatch(current, teamA, teamB, pitchType, matchOvers, boundarySize, `pass-${pass}`);
+    current = syncAllDismissals(current, teamA, teamB, pitchType);
+    current = rebuildBowlingForMatch(
+      current,
+      teamA,
+      teamB,
+      pitchType,
+      matchOvers,
+      boundarySize,
+      `pass-${pass}`,
+    );
+    rebuildPartnershipsAndFow(current, matchOvers);
+
     const errors = [
       ...validateMatchResult(current, matchOvers, teamA, teamB),
       ...validateBowlingFromQuota(current, teamA, teamB, matchOvers),
       ...validateBowlingStats(current, teamA, teamB, matchOvers),
       ...validateDismissalsAgainstBowling(current, teamA, teamB),
+      ...validateFallOfWickets(current),
     ];
     if (errors.length === 0) break;
   }
+
+  current = polishMatchResult(current, matchOvers);
+  syncAllDismissals(current, teamA, teamB, pitchType);
+  current = rebuildBowlingForMatch(current, teamA, teamB, pitchType, matchOvers, boundarySize, "final");
+  rebuildPartnershipsAndFow(current, matchOvers);
   return current;
 }
 
@@ -267,7 +294,16 @@ export function repairMatchStats(match: MatchResult, matchOvers: number): MatchR
 
     const batRuns = sumBattingRuns(inn.batting);
     inn.totalRuns = batRuns + inn.extras.total;
-    inn.totalWickets = Math.min(10, countDismissed(inn.batting));
+
+    const dismissedCount = countDismissed(inn.batting);
+    if (dismissedCount >= inn.totalWickets) {
+      inn.totalWickets = Math.min(10, dismissedCount);
+    } else if (inn.totalWickets > 0 && dismissedCount < inn.totalWickets) {
+      // Keep intended wicket count — syncAllDismissals will fix batting statuses
+      inn.totalWickets = Math.min(10, inn.totalWickets);
+    } else {
+      inn.totalWickets = Math.min(10, dismissedCount);
+    }
 
     const expectedNotOuts = notOutsForWickets(inn.totalWickets);
     let notOuts = countNotOuts(inn.batting);

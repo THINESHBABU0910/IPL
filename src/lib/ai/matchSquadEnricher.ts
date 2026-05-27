@@ -67,6 +67,10 @@ function seededRandom(seed: string): () => number {
   };
 }
 
+export function createSeededRng(seed: string): () => number {
+  return seededRandom(seed);
+}
+
 function getBattingSquad(team: ParsedTeam, impactActive: boolean): string[] {
   const order = team.playingXI
     .filter((p) => p.notes !== "bowling only")
@@ -287,7 +291,7 @@ function distributeWicketsWeighted(
   return distributeWicketsByQuota(totalWickets, weights);
 }
 
-function assignDismissalBowlers(
+export function applyDismissalBowlers(
   batting: MatchResult["innings"][0]["batting"],
   opposition: ParsedTeam,
   pitchType: string,
@@ -296,8 +300,11 @@ function assignDismissalBowlers(
   const dismissed = batting.filter((b) => !isNotOut(b.status));
   if (!opposition.bowlingQuota.length || !dismissed.length) return;
 
-  const runOutCount =
-    dismissed.length >= 7 && rng() > 0.82 ? 1 : dismissed.length >= 9 && rng() > 0.7 ? 1 : 0;
+  let runOutCount = dismissed.filter((b) => /^run out/i.test(b.status.trim())).length;
+  if (runOutCount === 0) {
+    runOutCount =
+      dismissed.length >= 7 && rng() > 0.82 ? 1 : dismissed.length >= 9 && rng() > 0.7 ? 1 : 0;
+  }
   const bowlerCreditWkts = Math.max(0, dismissed.length - runOutCount);
   const wktCounts = distributeWicketsWeighted(bowlerCreditWkts, opposition, pitchType);
   const pool = opposition.bowlingQuota.map((q, i) => {
@@ -311,12 +318,21 @@ function assignDismissalBowlers(
 
   const runOutIndices = new Set<number>();
   if (runOutCount > 0) {
-    const tailIdx = dismissed.length - 1 - Math.floor(rng() * Math.min(3, dismissed.length));
-    runOutIndices.add(Math.max(0, tailIdx));
+    const existing = dismissed
+      .map((b, i) => ({ b, i }))
+      .filter(({ b }) => /^run out/i.test(b.status.trim()));
+    if (existing.length) {
+      existing.forEach(({ i }) => runOutIndices.add(i));
+    } else {
+      const tailIdx = dismissed.length - 1 - Math.floor(rng() * Math.min(3, dismissed.length));
+      runOutIndices.add(Math.max(0, tailIdx));
+    }
   }
 
   for (let i = 0; i < dismissed.length; i++) {
     const b = dismissed[i];
+    if (/^run out/i.test(b.status.trim())) continue;
+
     const idx = batting.indexOf(b);
     const phase = phaseHintForIndex(idx);
 
@@ -496,7 +512,7 @@ function buildInnings(
     });
   }
 
-  assignDismissalBowlers(batting, opposition, pitchType, rng);
+  applyDismissalBowlers(batting, opposition, pitchType, rng);
 
   let sum = batting.reduce((s, b) => s + b.runs, 0);
   const diff = batRunsNeeded - sum;
@@ -658,7 +674,7 @@ export function enrichMatchFromSquads(match: MatchResult, ctx: SquadEnrichContex
   const target = inn1.totalRuns + 1;
   const chaseWins = rng() > (ctx.venue.typicalDew === "Heavy" ? 0.42 : 0.5);
   const chaseDepth = analyzeBattingDepth(order.secondBat);
-  const chaseWickets = pickWickets(
+  let chaseWickets = pickWickets(
     rng,
     ctx.venue.pitchType,
     true,
@@ -666,7 +682,28 @@ export function enrichMatchFromSquads(match: MatchResult, ctx: SquadEnrichContex
     order.firstBowl,
     chaseDepth,
   );
-  const chaseMargin = chaseWins ? 1 + Math.floor(rng() * 10) : 1 + Math.floor(rng() * 14);
+
+  const nailBiter = rng() < (ctx.venue.typicalDew === "Heavy" ? 0.58 : 0.48);
+  let chaseMargin: number;
+  if (chaseWins) {
+    if (nailBiter) {
+      const tight = rng() > 0.45;
+      if (tight) {
+        chaseMargin = 1 + Math.floor(rng() * 4);
+        chaseWickets = Math.max(3, Math.min(7, chaseWickets));
+      } else {
+        chaseMargin = 1 + Math.floor(rng() * 7);
+        chaseWickets = Math.max(4, Math.min(9, chaseWickets + Math.floor(rng() * 2)));
+      }
+    } else {
+      chaseMargin = 1 + Math.floor(rng() * 10);
+    }
+  } else if (nailBiter) {
+    chaseMargin = 1 + Math.floor(rng() * 5);
+    chaseWickets = Math.max(6, Math.min(10, chaseWickets + 1));
+  } else {
+    chaseMargin = 1 + Math.floor(rng() * 14);
+  }
   const chaseTotal = chaseWins ? target + chaseMargin - 1 : target - chaseMargin;
 
   const inn2 = buildInnings(
@@ -759,17 +796,25 @@ export function enrichMatchFromSquads(match: MatchResult, ctx: SquadEnrichContex
 
   if (inn2.totalRuns >= target) {
     const wktsLeft = 10 - inn2.totalWickets;
+    const runsAbove = inn2.totalRuns - target + 1;
+    const thriller =
+      runsAbove <= 4 || wktsLeft <= 2
+        ? " in a thriller"
+        : runsAbove <= 8 || wktsLeft <= 4
+          ? " in a tight finish"
+          : "";
     enriched.result = {
       winner: order.secondBat.name,
       margin: `by ${wktsLeft} wicket${wktsLeft === 1 ? "" : "s"}`,
-      summary: `${order.secondBat.name} won by ${wktsLeft} wicket${wktsLeft === 1 ? "" : "s"}`,
+      summary: `${order.secondBat.name} chased ${target} with ${wktsLeft} wicket${wktsLeft === 1 ? "" : "s"} to spare${thriller}`,
     };
   } else {
     const margin = target - inn2.totalRuns - 1;
+    const thriller = margin <= 4 ? " in a nail-biter" : margin <= 10 ? " in a close finish" : "";
     enriched.result = {
       winner: order.firstBat.name,
       margin: `by ${Math.max(1, margin)} run${margin === 1 ? "" : "s"}`,
-      summary: `${order.firstBat.name} won by ${Math.max(1, margin)} runs`,
+      summary: `${order.firstBat.name} defended ${inn1.totalRuns} by ${Math.max(1, margin)} run${margin === 1 ? "" : "s"}${thriller}`,
     };
   }
 

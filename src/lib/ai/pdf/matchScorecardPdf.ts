@@ -301,6 +301,9 @@ export function generateMatchScorecardPdf(match: MatchResult): Promise<Buffer> {
     drawTopBanner(doc, 1, totalPages, match.matchTitle);
     renderMatchHeader(doc, match);
     renderBattingSection(doc, inn1);
+    if (match.fallOfWickets.firstInnings.length) {
+      renderFow(doc, `${inn1.teamName} — Fall of Wickets`, match.fallOfWickets.firstInnings);
+    }
 
     // Page 2 — Team B bowling + Team B batting
     doc.addPage();
@@ -309,6 +312,9 @@ export function generateMatchScorecardPdf(match: MatchResult): Promise<Buffer> {
       renderBowlingSection(doc, `${inn2.teamName} Bowling`, inn1.bowling);
     }
     renderBattingSection(doc, inn2, inn2.target);
+    if (match.fallOfWickets.secondInnings.length) {
+      renderFow(doc, `${inn2.teamName} — Fall of Wickets`, match.fallOfWickets.secondInnings);
+    }
 
     // Page 3 — Team A bowling + partnerships + FOW + result (compact, auto page-break safe)
     doc.addPage();

@@ -14,6 +14,7 @@ import {
   repairMatchStats,
   ensureMatchReadyForPdf,
 } from "@/lib/ai/matchValidator";
+import { validateFallOfWickets } from "@/lib/ai/dismissalSync";
 import { normalizeMatchResponse, parseJsonLoose, type NormalizeContext } from "@/lib/ai/matchResponseNormalizer";
 import { enrichMatchFromSquads } from "@/lib/ai/matchSquadEnricher";
 import { simulateMatchLocally } from "@/lib/ai/localMatchSimulator";
@@ -174,7 +175,8 @@ export async function POST(req: NextRequest) {
             parsed.teamA,
             parsed.teamB,
           );
-          validationErrors = [...statErrors, ...quotaErrors, ...bowlingStatErrors, ...dismissalErrors];
+          const fowErrors = validateFallOfWickets(built);
+          validationErrors = [...statErrors, ...quotaErrors, ...bowlingStatErrors, ...dismissalErrors, ...fowErrors];
 
           if (validationErrors.length === 0) {
             matchResult = built;
