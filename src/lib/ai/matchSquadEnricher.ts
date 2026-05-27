@@ -17,6 +17,7 @@ import {
   getBatterProfile,
   conditionPerformanceBoost,
   bowlerWicketWeightBoost,
+  bowlerEconomyMultiplier,
   isValidImpactActivatedAt,
 } from "./playerPerformance";
 
@@ -291,7 +292,10 @@ function assignDismissalBowlers(
   const dismissed = batting.filter((b) => !isNotOut(b.status));
   if (!opposition.bowlingQuota.length || !dismissed.length) return;
 
-  const wktCounts = distributeWicketsWeighted(dismissed.length, opposition, pitchType);
+  const runOutCount =
+    dismissed.length >= 7 && rng() > 0.82 ? 1 : dismissed.length >= 9 && rng() > 0.7 ? 1 : 0;
+  const bowlerCreditWkts = Math.max(0, dismissed.length - runOutCount);
+  const wktCounts = distributeWicketsWeighted(bowlerCreditWkts, opposition, pitchType);
   const pool = opposition.bowlingQuota.map((q, i) => {
     const p = opposition.playingXI.find((x) => nameMatch(x.name, q.name));
     return {
@@ -301,10 +305,22 @@ function assignDismissalBowlers(
     };
   });
 
+  const runOutIndices = new Set<number>();
+  if (runOutCount > 0) {
+    const tailIdx = dismissed.length - 1 - Math.floor(rng() * Math.min(3, dismissed.length));
+    runOutIndices.add(Math.max(0, tailIdx));
+  }
+
   for (let i = 0; i < dismissed.length; i++) {
     const b = dismissed[i];
     const idx = batting.indexOf(b);
     const phase = phaseHintForIndex(idx);
+
+    if (runOutIndices.has(i)) {
+      b.status = "run out (fielder)";
+      continue;
+    }
+
     let candidates = pool.filter((x) => x.remaining > 0);
     if (!candidates.length) candidates = pool.filter((x) => x.remaining >= 0);
 
@@ -331,30 +347,96 @@ function buildBowlingFromQuota(
   wickets: number,
   matchOvers: number,
   pitchType: string,
+  batting?: MatchResult["innings"][0]["batting"],
 ): NonNullable<MatchResult["innings"][0]["bowling"]> {
   const quota = fieldingTeam.bowlingQuota;
   if (!quota.length) return [];
 
-  const wktSplit = distributeWicketsWeighted(wickets, fieldingTeam, pitchType);
+  let wktSplit: number[];
+  if (batting?.length) {
+    wktSplit = wicketSplitFromDismissals(batting, fieldingTeam, wickets, pitchType);
+  } else {
+    const runOuts = 0;
+    wktSplit = distributeWicketsWeighted(Math.max(0, wickets - runOuts), fieldingTeam, pitchType);
+  }
+
+  const runWeights = quota.map(
+    (q) => q.overs.length * bowlerEconomyMultiplier(cleanName(q.name), fieldingTeam, pitchType),
+  );
+  const runWeightSum = runWeights.reduce((a, b) => a + b, 0) || 1;
   let runsLeft = runsConceded;
 
   return quota.map((q, i) => {
     const bowlerOvers = q.overs.length;
     const isLast = i === quota.length - 1;
-    const runs = isLast ? runsLeft : Math.round(runsConceded * (bowlerOvers / matchOvers));
+    const runs = isLast ? runsLeft : Math.round(runsConceded * (runWeights[i] / runWeightSum));
     runsLeft -= runs;
+    const finalRuns = Math.max(0, runs);
     return {
       name: cleanName(q.name),
       overs: bowlerOvers,
       maidens: 0,
-      runs: Math.max(0, runs),
-      wickets: wktSplit[i],
-      economy: bowlerOvers > 0 ? Math.round((Math.max(0, runs) / bowlerOvers) * 100) / 100 : 0,
+      runs: finalRuns,
+      wickets: wktSplit[i] ?? 0,
+      economy: bowlerOvers > 0 ? Math.round((finalRuns / bowlerOvers) * 100) / 100 : 0,
       isImpact: fieldingTeam.impactPlayer?.name
         ? nameMatch(fieldingTeam.impactPlayer.name, q.name)
         : false,
     };
   });
+}
+
+function wicketSplitFromDismissals(
+  batting: MatchResult["innings"][0]["batting"],
+  fieldingTeam: ParsedTeam,
+  totalWickets: number,
+  pitchType: string,
+): number[] {
+  const quota = fieldingTeam.bowlingQuota;
+  const counts = new Array(quota.length).fill(0);
+  let runOuts = 0;
+
+  for (const b of batting) {
+    if (isNotOut(b.status)) continue;
+    if (/^run out/i.test(b.status.trim())) {
+      runOuts++;
+      continue;
+    }
+    const bowler = extractDismissalBowlerName(b.status);
+    if (!bowler) continue;
+    const idx = quota.findIndex((q) => nameMatch(q.name, bowler));
+    if (idx >= 0) counts[idx]++;
+  }
+
+  const credited = counts.reduce((a, c) => a + c, 0);
+  const expectedCredits = Math.max(0, totalWickets - runOuts);
+
+  if (credited === expectedCredits) return counts;
+
+  const fallback = distributeWicketsWeighted(expectedCredits, fieldingTeam, pitchType);
+  if (credited === 0) return fallback;
+
+  for (let i = 0; i < counts.length; i++) {
+    if (counts[i] > fallback[i]) counts[i] = fallback[i];
+  }
+  let assigned = counts.reduce((a, c) => a + c, 0);
+  let i = 0;
+  while (assigned < expectedCredits) {
+    counts[i % counts.length]++;
+    assigned++;
+    i++;
+  }
+  return counts;
+}
+
+function extractDismissalBowlerName(status: string): string | null {
+  const st = status.trim();
+  if (/not out/i.test(st) || /^run out/i.test(st)) return null;
+  const bMatch = st.match(/\bb\s+(.+)$/i);
+  if (bMatch) return cleanName(bMatch[1]);
+  const stMatch = st.match(/^st\s+(.+)$/i);
+  if (stMatch) return cleanName(stMatch[1]);
+  return null;
 }
 
 function buildInnings(
@@ -621,6 +703,7 @@ export function enrichMatchFromSquads(match: MatchResult, ctx: SquadEnrichContex
     inn1.totalWickets,
     ctx.matchOvers,
     ctx.venue.pitchType,
+    inn1.batting,
   );
   inn2.bowling = buildBowlingFromQuota(
     order.secondBowl,
@@ -628,6 +711,7 @@ export function enrichMatchFromSquads(match: MatchResult, ctx: SquadEnrichContex
     inn2.totalWickets,
     ctx.matchOvers,
     ctx.venue.pitchType,
+    inn2.batting,
   );
 
   const impactPlayers =

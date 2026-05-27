@@ -8,8 +8,11 @@ import { MatchResultSchema } from "@/lib/ai/matchSchema";
 import {
   validateMatchResult,
   validateBowlingFromQuota,
+  validateBowlingStats,
+  validateDismissalsAgainstBowling,
   enrichMatchWithBowling,
   repairMatchStats,
+  ensureMatchReadyForPdf,
 } from "@/lib/ai/matchValidator";
 import { normalizeMatchResponse, parseJsonLoose, type NormalizeContext } from "@/lib/ai/matchResponseNormalizer";
 import { enrichMatchFromSquads } from "@/lib/ai/matchSquadEnricher";
@@ -40,7 +43,7 @@ function buildFinalMatch(
   });
   match = repairMatchStats(match, matchOvers);
   match = polishMatchResult(match, matchOvers);
-  return enrichMatchWithBowling(match, teamA, teamB);
+  return enrichMatchWithBowling(match, teamA, teamB, ctx.venue.pitchType, matchOvers);
 }
 
 function runLocalSimulation(ctx: NormalizeContext, matchOvers: number) {
@@ -160,7 +163,18 @@ export async function POST(req: NextRequest) {
             parsed.teamB,
             matchOvers,
           );
-          validationErrors = [...statErrors, ...quotaErrors];
+          const bowlingStatErrors = validateBowlingStats(
+            built,
+            parsed.teamA,
+            parsed.teamB,
+            matchOvers,
+          );
+          const dismissalErrors = validateDismissalsAgainstBowling(
+            built,
+            parsed.teamA,
+            parsed.teamB,
+          );
+          validationErrors = [...statErrors, ...quotaErrors, ...bowlingStatErrors, ...dismissalErrors];
 
           if (validationErrors.length === 0) {
             matchResult = built;
@@ -186,6 +200,14 @@ export async function POST(req: NextRequest) {
       matchResult = runLocalSimulation(normalizeCtx, matchOvers);
       simulationMode = "local";
     }
+
+    matchResult = ensureMatchReadyForPdf(
+      matchResult,
+      parsed.teamA,
+      parsed.teamB,
+      venue.pitchType,
+      matchOvers,
+    );
 
     const pdfBuffer = await generateMatchScorecardPdf(matchResult);
     const simulationId = randomUUID();

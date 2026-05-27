@@ -1,9 +1,235 @@
 import type { MatchResult, ParsedTeam } from "./matchSchema";
 import { rebuildPartnershipsAndFow, syncBoundaries, notOutsForWickets } from "./matchSquadEnricher";
-import { sanitizePlayerName, sanitizeDismissalStatus } from "./playerNames";
+import { sanitizePlayerName, sanitizeDismissalStatus, namesMatch } from "./playerNames";
+import { bowlerEconomyMultiplier } from "./playerPerformance";
+import { distributeWicketsByQuota } from "./realismEngine";
 
 function isNotOut(status: string): boolean {
   return /not out/i.test(status);
+}
+
+function isRunOut(status: string): boolean {
+  return /^run out/i.test(status.trim());
+}
+
+function extractDismissalBowler(status: string): string | null {
+  const st = sanitizeDismissalStatus(status);
+  if (/not out/i.test(st) || isRunOut(st)) return null;
+  const bMatch = st.match(/\bb\s+(.+)$/i);
+  if (bMatch) {
+    const name = sanitizePlayerName(bMatch[1]);
+    if (/^bowler$/i.test(name)) return null;
+    return name;
+  }
+  const stMatch = st.match(/^st\s+(.+)$/i);
+  if (stMatch) return sanitizePlayerName(stMatch[1]);
+  return null;
+}
+
+function countRunOuts(batting: MatchResult["innings"][0]["batting"]): number {
+  return batting.filter((b) => !isNotOut(b.status) && isRunOut(b.status)).length;
+}
+
+export function resolveFieldingTeams(
+  match: MatchResult,
+  teamA: ParsedTeam,
+  teamB: ParsedTeam,
+): { inningsIdx: number; fieldingTeam: ParsedTeam }[] {
+  const toss = match.toss;
+  const aWins = namesMatch(toss.winner, teamA.name);
+  const winner = aWins ? teamA : teamB;
+  const loser = aWins ? teamB : teamA;
+  const winnerBatsFirst = toss.decision === "bat";
+  const firstBowl = winnerBatsFirst ? loser : winner;
+  const secondBowl = winnerBatsFirst ? winner : loser;
+  return [
+    { inningsIdx: 0, fieldingTeam: firstBowl },
+    { inningsIdx: 1, fieldingTeam: secondBowl },
+  ];
+}
+
+function distributeWicketsForTeam(
+  totalCredits: number,
+  fieldingTeam: ParsedTeam,
+  pitchType: string,
+): number[] {
+  const quota = fieldingTeam.bowlingQuota;
+  if (!quota.length || totalCredits <= 0) return new Array(quota.length).fill(0);
+  const weights = quota.map(
+    (q) =>
+      q.overs.length *
+      (1 + (bowlerEconomyMultiplier(q.name, fieldingTeam, pitchType) < 1 ? 0.15 : 0)),
+  );
+  return distributeWicketsByQuota(totalCredits, weights);
+}
+
+function wicketCountsFromDismissals(
+  batting: MatchResult["innings"][0]["batting"],
+  fieldingTeam: ParsedTeam,
+  totalWickets: number,
+  pitchType: string,
+): number[] {
+  const quota = fieldingTeam.bowlingQuota;
+  const counts = new Array(quota.length).fill(0);
+  const runOuts = countRunOuts(batting);
+  const expectedCredits = Math.max(0, totalWickets - runOuts);
+
+  for (const b of batting) {
+    if (isNotOut(b.status) || isRunOut(b.status)) continue;
+    const bowler = extractDismissalBowler(b.status);
+    if (!bowler) continue;
+    const idx = quota.findIndex((q) => namesMatch(q.name, bowler));
+    if (idx >= 0) counts[idx]++;
+  }
+
+  const credited = counts.reduce((a, c) => a + c, 0);
+  if (credited === expectedCredits) return counts;
+
+  const fallback = distributeWicketsForTeam(expectedCredits, fieldingTeam, pitchType);
+  if (credited === 0) return fallback;
+
+  for (let i = 0; i < counts.length; i++) {
+    counts[i] = Math.min(counts[i], fallback[i] + 1);
+  }
+  let assigned = counts.reduce((a, c) => a + c, 0);
+  let i = 0;
+  while (assigned < expectedCredits) {
+    counts[i % counts.length]++;
+    assigned++;
+    i++;
+  }
+  while (assigned > expectedCredits) {
+    const idx = counts.findIndex((c) => c > 0);
+    if (idx < 0) break;
+    counts[idx]--;
+    assigned--;
+  }
+  return counts;
+}
+
+function fixOrphanDismissals(
+  batting: MatchResult["innings"][0]["batting"],
+  bowling: NonNullable<MatchResult["innings"][0]["bowling"]>,
+  fieldingTeam: ParsedTeam,
+): void {
+  const dismissed = batting.filter((b) => !isNotOut(b.status) && !isRunOut(b.status));
+  const quota = fieldingTeam.bowlingQuota;
+  if (!quota.length) return;
+
+  const wktRemaining = new Map<string, number>();
+  for (const row of bowling) {
+    wktRemaining.set(row.name.toLowerCase(), row.wickets);
+  }
+
+  for (const b of dismissed) {
+    const bowler = extractDismissalBowler(b.status);
+    if (bowler && quota.some((q) => namesMatch(q.name, bowler))) continue;
+
+    const pick = bowling.find((row) => (wktRemaining.get(row.name.toLowerCase()) ?? 0) > 0)
+      ?? bowling.slice().sort((a, c) => c.wickets - a.wickets)[0];
+    if (!pick) continue;
+
+    wktRemaining.set(pick.name.toLowerCase(), Math.max(0, (wktRemaining.get(pick.name.toLowerCase()) ?? 0) - 1));
+    b.status = `b ${pick.name}`;
+  }
+}
+
+export function rebuildBowlingForInnings(
+  inn: MatchResult["innings"][0],
+  fieldingTeam: ParsedTeam,
+  pitchType: string,
+  _matchOvers: number,
+): NonNullable<MatchResult["innings"][0]["bowling"]> {
+  const quota = fieldingTeam.bowlingQuota;
+  if (!quota.length) return [];
+
+  const wktSplit = wicketCountsFromDismissals(
+    inn.batting,
+    fieldingTeam,
+    inn.totalWickets,
+    pitchType,
+  );
+  const runWeights = quota.map(
+    (q) => q.overs.length * bowlerEconomyMultiplier(q.name, fieldingTeam, pitchType),
+  );
+  const runWeightSum = runWeights.reduce((a, b) => a + b, 0) || 1;
+  let runsLeft = inn.totalRuns;
+
+  const rows = quota.map((q, i) => {
+    const bowlerOvers = q.overs.length;
+    const isLast = i === quota.length - 1;
+    const runs = isLast ? runsLeft : Math.round(inn.totalRuns * (runWeights[i] / runWeightSum));
+    runsLeft -= runs;
+    const finalRuns = Math.max(0, runs);
+    return {
+      name: sanitizePlayerName(q.name),
+      overs: bowlerOvers,
+      maidens: 0,
+      runs: finalRuns,
+      wickets: wktSplit[i] ?? 0,
+      economy: bowlerOvers > 0 ? Math.round((finalRuns / bowlerOvers) * 100) / 100 : 0,
+      isImpact: fieldingTeam.impactPlayer?.name
+        ? namesMatch(fieldingTeam.impactPlayer.name, q.name)
+        : false,
+    };
+  });
+
+  fixOrphanDismissals(inn.batting, rows, fieldingTeam);
+
+  const finalSplit = wicketCountsFromDismissals(
+    inn.batting,
+    fieldingTeam,
+    inn.totalWickets,
+    pitchType,
+  );
+  for (let i = 0; i < rows.length; i++) {
+    rows[i].wickets = finalSplit[i] ?? 0;
+  }
+
+  return rows;
+}
+
+/** Rebuild bowling figures for both innings and sync dismissals — call after repairMatchStats */
+export function rebuildBowlingForMatch(
+  match: MatchResult,
+  teamA: ParsedTeam,
+  teamB: ParsedTeam,
+  pitchType: string,
+  matchOvers: number,
+): MatchResult {
+  const fielding = resolveFieldingTeams(match, teamA, teamB);
+  const innings = match.innings.map((inn, idx) => {
+    const mapping = fielding.find((f) => f.inningsIdx === idx);
+    if (!mapping) return inn;
+    const bowling = rebuildBowlingForInnings(inn, mapping.fieldingTeam, pitchType, matchOvers);
+    return { ...inn, bowling };
+  }) as MatchResult["innings"];
+
+  const updated = { ...match, innings };
+  rebuildPartnershipsAndFow(updated, matchOvers);
+  return updated;
+}
+
+export function ensureMatchReadyForPdf(
+  match: MatchResult,
+  teamA: ParsedTeam,
+  teamB: ParsedTeam,
+  pitchType: string,
+  matchOvers: number,
+): MatchResult {
+  let current = rebuildBowlingForMatch(match, teamA, teamB, pitchType, matchOvers);
+  for (let pass = 0; pass < 2; pass++) {
+    current = repairMatchStats(current, matchOvers);
+    current = rebuildBowlingForMatch(current, teamA, teamB, pitchType, matchOvers);
+    const errors = [
+      ...validateMatchResult(current, matchOvers, teamA, teamB),
+      ...validateBowlingFromQuota(current, teamA, teamB, matchOvers),
+      ...validateBowlingStats(current, teamA, teamB, matchOvers),
+      ...validateDismissalsAgainstBowling(current, teamA, teamB),
+    ];
+    if (errors.length === 0) break;
+  }
+  return current;
 }
 
 function countNotOuts(batting: MatchResult["innings"][0]["batting"]): number {
@@ -217,76 +443,130 @@ export function validateBowlingFromQuota(
 ): string[] {
   const errors: string[] = [];
 
-  const buildBowlingRows = (team: ParsedTeam, inningsIdx: number) => {
+  for (const { inningsIdx, fieldingTeam } of resolveFieldingTeams(match, teamA, teamB)) {
     const inn = match.innings[inningsIdx];
-    if (!inn.bowling?.length) return;
-
-    const quotaMap = new Map<string, number[]>();
-    for (const q of team.bowlingQuota) {
-      quotaMap.set(q.name.toLowerCase(), q.overs);
+    if (!fieldingTeam.bowlingQuota.length) {
+      errors.push(`Innings ${inningsIdx + 1}: no bowling quota for fielding side`);
+      continue;
+    }
+    if (!inn.bowling?.length) {
+      errors.push(`Innings ${inningsIdx + 1} (${inn.teamName}): missing bowling figures`);
+      continue;
     }
 
     for (const bowler of inn.bowling) {
-      const quota = quotaMap.get(bowler.name.toLowerCase());
-      if (quota && Math.abs(bowler.overs - quota.length) > 0.01) {
-        errors.push(`Bowling: ${bowler.name} bowled ${bowler.overs} overs, quota assigns ${quota.length}`);
+      const quota = fieldingTeam.bowlingQuota.find((q) => namesMatch(q.name, bowler.name));
+      if (!quota) {
+        errors.push(`Bowling: ${bowler.name} not in ${fieldingTeam.name} quota`);
+        continue;
+      }
+      if (Math.abs(bowler.overs - quota.overs.length) > 0.01) {
+        errors.push(
+          `Bowling: ${bowler.name} bowled ${bowler.overs} overs, quota assigns ${quota.overs.length}`,
+        );
       }
     }
 
     const totalBowlingOvers = inn.bowling.reduce((s, b) => s + b.overs, 0);
     if (Math.abs(totalBowlingOvers - matchOvers) > 0.1) {
-      errors.push(`Innings ${inningsIdx + 1} bowling overs sum ${totalBowlingOvers}, expected ${matchOvers}`);
+      errors.push(
+        `Innings ${inningsIdx + 1} bowling overs sum ${totalBowlingOvers}, expected ${matchOvers}`,
+      );
     }
-  };
+  }
 
-  buildBowlingRows(teamB, 0);
-  buildBowlingRows(teamA, 1);
+  return errors;
+}
+
+export function validateBowlingStats(
+  match: MatchResult,
+  teamA: ParsedTeam,
+  teamB: ParsedTeam,
+  _matchOvers: number,
+): string[] {
+  const errors: string[] = [];
+
+  for (const { inningsIdx, fieldingTeam } of resolveFieldingTeams(match, teamA, teamB)) {
+    const inn = match.innings[inningsIdx];
+    const label = `Innings ${inningsIdx + 1} (${inn.teamName})`;
+    if (!inn.bowling?.length) {
+      errors.push(`${label}: missing bowling figures`);
+      continue;
+    }
+
+    const runOuts = countRunOuts(inn.batting);
+    const bowlingWkts = inn.bowling.reduce((s, b) => s + b.wickets, 0);
+    const expectedBowlingWkts = Math.max(0, inn.totalWickets - runOuts);
+    if (bowlingWkts !== expectedBowlingWkts) {
+      errors.push(
+        `${label}: bowling wickets ${bowlingWkts} != credited dismissals ${expectedBowlingWkts} (${runOuts} run out)`,
+      );
+    }
+
+    const bowlingRuns = inn.bowling.reduce((s, b) => s + b.runs, 0);
+    if (Math.abs(bowlingRuns - inn.totalRuns) > 1) {
+      errors.push(`${label}: bowling runs ${bowlingRuns} != innings total ${inn.totalRuns}`);
+    }
+
+    for (const row of inn.bowling) {
+      if (row.overs <= 0) continue;
+      const expectedEco = Math.round((row.runs / row.overs) * 100) / 100;
+      if (Math.abs(row.economy - expectedEco) > 0.05) {
+        errors.push(`${label}: ${row.name} economy ${row.economy} expected ${expectedEco}`);
+      }
+    }
+  }
+
+  return errors;
+}
+
+export function validateDismissalsAgainstBowling(
+  match: MatchResult,
+  teamA: ParsedTeam,
+  teamB: ParsedTeam,
+): string[] {
+  const errors: string[] = [];
+
+  for (const { inningsIdx, fieldingTeam } of resolveFieldingTeams(match, teamA, teamB)) {
+    const inn = match.innings[inningsIdx];
+    const label = `Innings ${inningsIdx + 1}`;
+    const wktByBowler = new Map<string, number>();
+
+    for (const b of inn.batting) {
+      if (isNotOut(b.status) || isRunOut(b.status)) continue;
+      const bowler = extractDismissalBowler(b.status);
+      if (!bowler) {
+        errors.push(`${label}: ${b.name} dismissal "${b.status}" has no credited bowler`);
+        continue;
+      }
+      if (!fieldingTeam.bowlingQuota.some((q) => namesMatch(q.name, bowler))) {
+        errors.push(`${label}: ${b.name} dismissed by ${bowler} who is not in bowling quota`);
+      }
+      const key = fieldingTeam.bowlingQuota.find((q) => namesMatch(q.name, bowler))?.name ?? bowler;
+      wktByBowler.set(key.toLowerCase(), (wktByBowler.get(key.toLowerCase()) ?? 0) + 1);
+    }
+
+    for (const row of inn.bowling ?? []) {
+      const credited = wktByBowler.get(row.name.toLowerCase()) ?? 0;
+      if (row.wickets > 0 && credited === 0) {
+        errors.push(`${label}: ${row.name} has ${row.wickets} wicket(s) in figures but no matching dismissal`);
+      }
+      if (credited > row.wickets) {
+        errors.push(`${label}: ${row.name} has ${row.wickets} wicket(s) in figures but ${credited} dismissals credit them`);
+      }
+    }
+  }
 
   return errors;
 }
 
 /** Ensure LLM output includes bowling figures derived from innings if missing */
-export function enrichMatchWithBowling(match: MatchResult, teamA: ParsedTeam, teamB: ParsedTeam): MatchResult {
-  const enriched = { ...match, innings: [...match.innings] as MatchResult["innings"] };
-
-  if (!enriched.innings[0].bowling?.length) {
-    enriched.innings[0] = {
-      ...enriched.innings[0],
-      bowling: buildPlaceholderBowling(teamB, enriched.innings[0].totalRuns, enriched.innings[0].totalWickets, enriched.innings[0].overs),
-    };
-  }
-  if (!enriched.innings[1].bowling?.length) {
-    enriched.innings[1] = {
-      ...enriched.innings[1],
-      bowling: buildPlaceholderBowling(teamA, enriched.innings[1].totalRuns, enriched.innings[1].totalWickets, enriched.innings[1].overs),
-    };
-  }
-
-  return enriched;
-}
-
-function buildPlaceholderBowling(
-  fieldingTeam: ParsedTeam,
-  runsConceded: number,
-  wickets: number,
-  overs: number,
-): MatchResult["innings"][0]["bowling"] {
-  const quota = fieldingTeam.bowlingQuota;
-  if (!quota.length) return [];
-
-  const rows = quota.map((q, i) => {
-    const bowlerOvers = q.overs.length;
-    const share = quota.length > 0 ? bowlerOvers / overs : 1 / quota.length;
-    return {
-      name: q.name,
-      overs: bowlerOvers,
-      maidens: 0,
-      runs: Math.round(runsConceded * share),
-      wickets: i === 0 ? Math.min(wickets, 3) : Math.floor(wickets / quota.length),
-      economy: bowlerOvers > 0 ? Math.round((runsConceded * share / bowlerOvers) * 100) / 100 : 0,
-      isImpact: fieldingTeam.impactPlayer?.name.toLowerCase() === q.name.toLowerCase(),
-    };
-  });
-
-  return rows;
+export function enrichMatchWithBowling(
+  match: MatchResult,
+  teamA: ParsedTeam,
+  teamB: ParsedTeam,
+  pitchType: string,
+  matchOvers: number,
+): MatchResult {
+  return rebuildBowlingForMatch(match, teamA, teamB, pitchType, matchOvers);
 }

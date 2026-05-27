@@ -1,5 +1,6 @@
 import type { ParsedTeam } from "./matchSchema";
 import { namesMatch } from "./playerNames";
+import { isSpinnerName } from "./realismEngine";
 
 export interface BatterProfile {
   overseas: boolean;
@@ -112,6 +113,52 @@ export function bowlerWicketWeightBoost(
   if (player.isNew && (pitchType === "Turning" || pitchType === "Slow")) w += 0.25;
   if (player.overseas && (pitchType === "Turning" || pitchType === "Slow")) w += 0.15;
   return w;
+}
+
+/**
+ * Run-conceded weight for quota split — values above 1 mean expensive figures on this surface.
+ * Spin on green/flat goes expensive; pace on turning tracks goes expensive; overseas mismatch penalised.
+ */
+export function bowlerEconomyMultiplier(
+  bowlerName: string,
+  squad: ParsedTeam,
+  pitchType: string,
+): number {
+  const player = squad.playingXI.find((p) => namesMatch(p.name, bowlerName));
+  const spin = isSpinnerName(bowlerName, player?.role);
+  const turning = pitchType === "Turning" || pitchType === "Slow";
+  const green = pitchType === "Green";
+  const flat = pitchType === "Flat";
+
+  let mult = 1;
+
+  if (spin) {
+    if (turning) mult *= 0.78;
+    else if (green) mult *= 1.38;
+    else if (flat) mult *= 1.22;
+  } else {
+    if (green) mult *= 0.82;
+    else if (turning) mult *= 1.32;
+    else if (flat) mult *= 1.08;
+  }
+
+  if (player?.overseas) {
+    if (green && !spin) mult *= 0.9;
+    else if (turning && spin) mult *= 0.92;
+    else if (green && spin) mult *= 1.12;
+    else if (turning && !spin) mult *= 1.18;
+    else if (flat) mult *= 1.06;
+  }
+
+  if (player?.isNew) {
+    if (turning && spin) mult *= 0.88;
+    else if (green && !spin) mult *= 0.9;
+    else if (turning && !spin) mult *= 1.25;
+    else if (green && spin) mult *= 1.2;
+    else mult *= 1.08;
+  }
+
+  return Math.min(1.75, Math.max(0.68, mult));
 }
 
 export function isValidImpactActivatedAt(value: string | undefined): boolean {
