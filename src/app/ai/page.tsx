@@ -225,13 +225,18 @@ export default function AiMatchPage() {
           </h1>
           <p className="text-[9px] text-gray-500 tracking-wider uppercase">IPL · Realistic T20</p>
         </div>
-        <button
-          type="button"
-          onClick={() => setShowHistory((s) => !s)}
-          className="text-xs text-ipl-gold"
-        >
-          History
-        </button>
+        <div className="flex items-center gap-2 shrink-0">
+          <Link href="/ai/points" className="text-[10px] text-green-400 border border-green-500/30 rounded-lg px-2 py-0.5">
+            Points
+          </Link>
+          <button
+            type="button"
+            onClick={() => setShowHistory((s) => !s)}
+            className="text-xs text-ipl-gold"
+          >
+            History
+          </button>
+        </div>
       </header>
 
       <main className="app-main overflow-y-auto px-3 py-3 space-y-3">

@@ -1,0 +1,180 @@
+/** Example league scorecards (IPL-style) for points table demo */
+export const SAMPLE_LEAGUE_SCORECARDS = `1ST MATCH
+PUNJAB-192/5(20overs)
+MI-178/8(20overs)
+
+2ND MATCH
+CSK-165/6(20overs)
+LSG-154/9(20overs)
+
+3RD MATCH
+KKR-204/5(20overs)
+GT-208/5(19.4overs)
+
+4TH MATCH
+RCB-226/4(20overs)
+SRH-230/6(19.5overs)
+
+5TH MATCH
+RR-188/6(20overs)
+DC-174/7(20overs)
+
+6TH MATCH
+LSG-158/7(20overs)
+MI-146/8(20overs)
+
+7TH MATCH
+PUNJAB-192/5(20overs)
+GT-196/6(19.4overs)
+
+8TH MATCH
+CSK-164/7(20overs)
+SRH-142/10(19.2overs)
+
+9TH MATCH
+KKR-206/5(20overs)
+DC-188/8(20overs)
+
+10TH MATCH
+RCB-218/4(20overs)
+RR-222/6(19.4overs)
+
+11TH MATCH
+GT-184/6(20overs)
+MI-161/10(19.2overs)
+
+12TH MATCH
+LSG-154/6(20overs)
+SRH-141/10(19.3overs)
+
+13TH MATCH
+PUNJAB-206/5(20overs)
+DC-191/7(20overs)
+
+14TH MATCH
+CSK-158/7(20overs)
+RR-144/9(20overs)
+
+15TH MATCH
+KKR-212/6(20overs)
+RCB-203/8(20overs)
+
+16TH MATCH
+SRH-192/4(20overs)
+MI-180/8(20overs)
+
+17TH MATCH
+DC-175/7(20overs)
+GT-176/4(19overs)
+
+18TH MATCH
+LSG-165/6(20overs)
+RR-157/8(20overs)
+
+19TH MATCH
+RCB-158/8(20overs)
+PUNJAB-160/4(18.2overs)
+
+20TH MATCH
+CSK-165/7(20overs)
+KKR-153/9(20overs)
+
+21TH MATCH
+DC-158/8(20overs)
+MI-160/5(19.2overs)
+
+22TH MATCH
+SRH-188/6(20overs)
+RR-185/8(20overs)
+
+23TH MATCH
+GT-182/6(20overs)
+RCB-164/8(20overs)
+
+24TH MATCH
+KKR-185/5(20overs)
+LSG-174/6(20overs)
+
+25TH MATCH
+CSK-182/6(20overs)
+PUNJAB-164/8(20overs)
+
+26TH MATCH
+RR-208/5(20overs)
+MI-209/3(19.4overs)
+
+27TH MATCH
+DC-232/5(20overs)
+RCB-218/6(20overs)
+
+28TH MATCH
+SRH-214/6(20overs)
+KKR-192/7(20overs)
+
+29TH MATCH
+GT-184/5(20overs)
+CSK-173/7(20overs)
+
+30TH MATCH
+LSG-164/6(20overs)
+PUNJAB-155/8(20overs)
+
+31TH MATCH
+MI-176/8(20overs)
+RCB-177/3(19.2overs)
+
+32TH MATCH
+KKR-178/6(20overs)
+RR-179/4(19.4overs)
+
+33TH MATCH
+DC-176/8(20overs)
+CSK-158/7(20overs)
+
+34TH MATCH
+SRH-180/6(20overs)
+PUNJAB-184/2(18.2overs)
+
+35TH MATCH
+GT-222/7(20overs)
+LSG-201/8(20overs)
+
+36TH MATCH
+KKR-197/6(20overs)
+MI-199/5(19.4overs)
+
+37TH MATCH
+CSK-210/6(20overs)
+RCB-211/4(19.2overs)
+
+38TH MATCH
+RR-175/8(20overs)
+PUNJAB-178/6(19.4overs)
+
+39TH MATCH
+DC-192/7(20overs)
+LSG-193/6(19.5overs)
+
+40TH MATCH
+SRH-185/7(20overs)
+GT-186/5(19.2overs)
+
+41TH MATCH
+MI-192/7(20overs)
+CSK-196/5(19.4overs)
+
+42TH MATCH
+PUNJAB-185/5(20overs)
+KKR-188/3(19.1overs)
+
+43TH MATCH
+DC-205/5(20overs)
+SRH-206/4(19.4overs)
+
+44TH MATCH
+LSG-210/6(20overs)
+RCB-211/4(19.3overs)
+
+45TH MATCH
+RR-178/7(20overs)
+GT-182/4(19.1overs)`;

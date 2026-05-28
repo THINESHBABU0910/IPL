@@ -33,7 +33,13 @@ export default function HomeHeader({ productTab, leagueConfig, selectedMode }: H
       >
         AI Match Sim
       </Link>
-      <div className="text-center home-hero px-12">
+      <Link
+        href="/ai/points"
+        className="absolute right-3 text-[10px] font-semibold text-green-400/90 hover:text-green-400 border border-green-500/30 rounded-lg px-2 py-1"
+      >
+        Points Table
+      </Link>
+      <div className="text-center home-hero px-[5.5rem]">
         <h1 className="text-xl font-black tracking-tight">
           <span className="bg-gradient-to-r from-ipl-gold via-yellow-300 to-ipl-gold bg-clip-text text-transparent animate-shimmer bg-[length:200%_100%]">
             {title}
