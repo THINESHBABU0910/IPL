@@ -1,6 +1,6 @@
 import { Server, Socket } from "socket.io";
 import { ServerToClientEvents, ClientToServerEvents, RuntimeStatePayload } from "../lib/types";
-import { RTM_TIMER, RETENTION_TIMER, TIMER_INITIAL } from "../lib/constants";
+import { RTM_TIMER, TIMER_INITIAL } from "../lib/constants";
 import {
   createRoom, getRoom, deleteRoom, addTeam, removeTeam,
   getTeamIdForSocket,
@@ -24,7 +24,10 @@ import {
   completeRtmMatch, passRtmMatch, clearRtmAuctionState, getRemainingCount,
 } from "./auctionEngine";
 import { isValidPlayerName, normalizePlayerName } from "../lib/validateName";
-import { getInitialRtmCards, isRetentionMode } from "../lib/iplRules";
+import { isRetentionMode } from "../lib/iplRules";
+import { validateCreateRoom } from "../lib/legendRules";
+import { getInitialRtmCardsForLeague } from "../lib/leagueRules";
+import { getRoomLeague, getRoomRules } from "./leagueHelpers";
 import { withRoomLock } from "./roomLock";
 import { saveRoomSnapshot, deleteRoomSnapshot, hydrateRoomsFromSnapshots, tryRestoreRoom } from "./roomPersistence";
 import { parseLeagueId, getTeamMapForLeague } from "../data/leagueRegistry";
@@ -179,12 +182,19 @@ export function registerHandlers(io: IOServer): void {
       let roomId = generateRoomCodeUtil();
       while (getRoom(roomId)) roomId = generateRoomCodeUtil();
       const gameType = data.gameType === "draft" ? "draft" : "auction";
+      const league = parseLeagueId(data.league);
+      const mode = data.mode || "mega";
+      const roomErr = gameType === "auction" ? validateCreateRoom(league, mode) : null;
+      if (roomErr) {
+        callback({ error: roomErr });
+        return;
+      }
       const room = createRoom(
         roomId,
-        data.mode || "mega",
+        mode,
         socket.id,
         playerName,
-        parseLeagueId(data.league),
+        league,
         gameType,
         data.draftGender,
       );
@@ -920,7 +930,7 @@ export function registerHandlers(io: IOServer): void {
 function startRetentionPhase(io: IOServer, room: Room): void {
   if (room.auction.phase !== "lobby") return;
   room.auction.phase = "retention";
-  room.retentionTimeLeft = RETENTION_TIMER;
+  room.retentionTimeLeft = getRoomRules(room).retentionTimer;
   io.to(room.id).emit("phase-change", { phase: "retention" });
   broadcastState(io, room);
 
@@ -933,7 +943,7 @@ function startRetentionPhase(io: IOServer, room: Room): void {
       for (const team of room.teams.values()) {
         if (!team.retentionLocked) {
           team.retentionLocked = true;
-          team.rtmCards = getInitialRtmCards(room.mode, 0);
+          team.rtmCards = getInitialRtmCardsForLeague(getRoomLeague(room), room.mode, 0);
         }
       }
       startAuction(io, room);

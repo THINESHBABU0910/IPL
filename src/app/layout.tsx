@@ -3,8 +3,8 @@ import "./globals.css";
 import KeepAliveProvider from "@/components/KeepAliveProvider";
 
 export const metadata: Metadata = {
-  title: "IPL 2026 Auction Game",
-  description: "Play IPL 2026 Auction with friends — real-time multiplayer bidding",
+  title: "Cricket Auction Live",
+  description: "IPL, WPL, BBL, SA20, The Hundred & Legend mode — real-time multiplayer cricket auctions",
 };
 
 export const viewport: Viewport = {

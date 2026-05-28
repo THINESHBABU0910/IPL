@@ -15,6 +15,24 @@ export function formatLeaguePrice(lakhs: number, league: LeagueId = "ipl"): stri
     return `${currencySymbol}${lakhs}K`;
   }
 
+  if (league === "sa20") {
+    if (lakhs >= 1000) {
+      const m = lakhs / 1000;
+      return `${currencySymbol}${m % 1 === 0 ? m : m.toFixed(2)}M`;
+    }
+    if (lakhs >= 100) return `${currencySymbol}${(lakhs / 100).toFixed(1)}M`;
+    return `${currencySymbol}${lakhs}K`;
+  }
+
+  if (league === "bbl" || league === "wbbl") {
+    if (lakhs >= 1000) {
+      const m = lakhs / 1000;
+      return `${currencySymbol}${m % 1 === 0 ? m : m.toFixed(2)}M`;
+    }
+    if (lakhs >= 100) return `${currencySymbol}${(lakhs / 100).toFixed(2)}M`;
+    return `${currencySymbol}${lakhs}K`;
+  }
+
   // IPL / WPL — INR lakhs and crores
   if (lakhs >= 100) {
     const cr = lakhs / 100;
@@ -36,6 +54,18 @@ export function getBidIncrementForLeague(currentBidLakhs: number, league: League
     if (currentBidLakhs < 200) return 15;
     return 20;
   }
+  if (league === "sa20") {
+    if (currentBidLakhs < 50) return 5;
+    if (currentBidLakhs < 150) return 10;
+    if (currentBidLakhs < 300) return 20;
+    return 30;
+  }
+  if (league === "bbl" || league === "wbbl") {
+    if (currentBidLakhs < 50) return 5;
+    if (currentBidLakhs < 100) return 10;
+    if (currentBidLakhs < 200) return 15;
+    return 20;
+  }
   // IPL official slabs
   if (currentBidLakhs < 100) return 5;
   if (currentBidLakhs < 200) return 10;
@@ -45,6 +75,11 @@ export function getBidIncrementForLeague(currentBidLakhs: number, league: League
 
 export function calculateNextBidForLeague(currentBidLakhs: number, league: LeagueId = "ipl"): number {
   return currentBidLakhs + getBidIncrementForLeague(currentBidLakhs, league);
+}
+
+/** Label for “you are highest bidder — next raise” button */
+export function formatBidRaiseLabel(incrementLakhs: number, league: LeagueId = "ipl"): string {
+  return `BID (+${formatLeaguePrice(incrementLakhs, league)})`;
 }
 
 export function getLeagueRulesSummary(league: LeagueId): string {
@@ -63,6 +98,8 @@ export function getModeSubtitle(mode: string, league: LeagueId): string {
       return `Official slabs · Pick squad · RTM after lock`;
     case "flex_retention":
       return `Any player · Your prices · ${purse} purse`;
+    case "legend":
+      return "IPL franchises · All-time legends · No retention · No RTM";
     default:
       return getLeagueRulesSummary(league);
   }
@@ -151,6 +188,7 @@ export function getInitialRtmCardsForLeague(
   retainedCount: number,
 ): number {
   const rules = getLeagueConfig(league).rules;
+  if (mode === "legend") return 0;
   const allowed = mode === "mega" || mode === "custom_retention" || mode === "flex_retention";
   if (!allowed) return 0;
   return Math.max(0, rules.maxRetentions - retainedCount);

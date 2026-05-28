@@ -27,6 +27,8 @@ import { Toaster, toast } from "sonner";
 import { saveSession, getSessionForRoom } from "@/lib/session";
 import { saveRoomArchive, getRoomArchive, isCompletedArchive, saveRoomProgress } from "@/lib/roomArchive";
 import { getLeagueConfig } from "@/data/leagueRegistry";
+import { isLegendMode } from "@/lib/constants";
+import { MODE_LABELS } from "@/components/home/homeConstants";
 import { isValidPlayerName, normalizePlayerName } from "@/lib/validateName";
 import {
   playBidSound, playSoldSound, playUnsoldSound, playRTMSound, playTimerWarning, playTimerFinalBeep, isSoundEnabled, setSoundEnabled,
@@ -435,6 +437,16 @@ export default function RoomPage() {
               {!offlineMode && <span className="w-1.5 h-1.5 rounded-full bg-green-400 shrink-0" />}
               {offlineMode && <span className="ref-pill ref-pill-orange text-[8px]">SAVED</span>}
               <span className="text-[10px] text-gray-400">{participantCount}/10</span>
+              {roomState && (
+                <span className="text-[9px] text-gray-500 truncate">
+                  {getLeagueConfig(roomState.league ?? "ipl").shortLabel}
+                  {isLegendMode(roomState.mode)
+                    ? " · Legend"
+                    : roomState.mode
+                      ? ` · ${MODE_LABELS[roomState.mode] || roomState.mode}`
+                      : ""}
+                </span>
+              )}
             </div>
           </div>
         </div>

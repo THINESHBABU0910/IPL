@@ -1,7 +1,12 @@
 {
-  "WMI": "/logos/wpl/WMI.svg",
-  "WRCB": "/logos/wpl/WRCB.svg",
-  "WDC": "/logos/wpl/WDC.svg",
-  "GG": "/logos/wpl/GG.svg",
-  "UPW": "/logos/wpl/UPW.svg"
+  "CSK": "/logos/wpl/CSK.png",
+  "MI": "/logos/wpl/MI.png",
+  "RCB": "/logos/wpl/RCB.png",
+  "DC": "/logos/wpl/DC.png",
+  "KKR": "/logos/wpl/KKR.png",
+  "SRH": "/logos/wpl/SRH.png",
+  "PBKS": "/logos/wpl/PBKS.svg",
+  "RR": "/logos/wpl/RR.png",
+  "GT": "/logos/wpl/GT.svg",
+  "LSG": "/logos/wpl/LSG.svg"
 }

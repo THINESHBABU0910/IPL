@@ -1,8 +1,8 @@
 "use client";
 
 import { AuctionActivity } from "@/lib/auctionActivity";
-import { RoomState } from "@/lib/types";
-import { formatPrice } from "@/lib/constants";
+import { LeagueId, RoomState } from "@/lib/types";
+import { formatLeaguePrice } from "@/lib/leagueRules";
 import TeamLogo from "@/components/TeamLogo";
 import { getSoldFlavorText } from "@/lib/soldFlavorText";
 
@@ -13,11 +13,12 @@ interface FeedEventCardProps {
 }
 
 export default function FeedEventCard({ activity, roomState, compact }: FeedEventCardProps) {
+  const league = roomState.league ?? "ipl";
   switch (activity.type) {
     case "BID_PLACED":
-      return <BidCard activity={activity} roomState={roomState} compact={compact} />;
+      return <BidCard activity={activity} roomState={roomState} league={league} compact={compact} />;
     case "PLAYER_SOLD":
-      return <SoldCard activity={activity} roomState={roomState} compact={compact} />;
+      return <SoldCard activity={activity} roomState={roomState} league={league} compact={compact} />;
     case "PLAYER_UNSOLD":
       return <UnsoldCard activity={activity} compact={compact} />;
     case "PLAYER_JOINED":
@@ -38,7 +39,7 @@ export default function FeedEventCard({ activity, roomState, compact }: FeedEven
   }
 }
 
-function BidCard({ activity, roomState, compact }: FeedEventCardProps & { compact?: boolean }) {
+function BidCard({ activity, roomState, league, compact }: FeedEventCardProps & { league: LeagueId; compact?: boolean }) {
   const team = activity.teamId ? roomState.teams[activity.teamId] : null;
   if (!team || !activity.playerName) return null;
 
@@ -46,12 +47,12 @@ function BidCard({ activity, roomState, compact }: FeedEventCardProps & { compac
     <div className={`ref-card flex items-center gap-2 ${compact ? "p-2" : "p-2.5"}`}>
       <span className={`shrink-0 ${compact ? "text-base" : "text-lg"}`} aria-hidden>🔨</span>
       {activity.teamId && (
-        <TeamLogo teamId={activity.teamId} logoUrl={team.logoUrl} shortName={team.shortName} size={compact ? 24 : 28} />
+        <TeamLogo teamId={activity.teamId} logoUrl={team.logoUrl} shortName={team.shortName} size={compact ? 24 : 28} league={league} />
       )}
       <div className={`flex-1 min-w-0 ${compact ? "text-[10px]" : "text-[11px]"}`}>
         <span className="text-[#FFD700] font-bold">{team.shortName}</span>
         <span className="text-gray-300"> bid </span>
-        <span className="text-[#22C55E] font-bold">{formatPrice(activity.price || 0)}</span>
+        <span className="text-[#22C55E] font-bold">{formatLeaguePrice(activity.price || 0, league)}</span>
         <span className="text-gray-300"> for </span>
         <span className="text-white font-medium">{activity.playerName}</span>
       </div>
@@ -59,7 +60,7 @@ function BidCard({ activity, roomState, compact }: FeedEventCardProps & { compac
   );
 }
 
-function SoldCard({ activity, roomState, compact }: FeedEventCardProps & { compact?: boolean }) {
+function SoldCard({ activity, roomState, league, compact }: FeedEventCardProps & { league: LeagueId; compact?: boolean }) {
   const team = activity.teamId ? roomState.teams[activity.teamId] : null;
   if (!team || !activity.playerName) return null;
   const flavor = compact ? null : getSoldFlavorText(activity.playerName, team.shortName);
@@ -67,14 +68,14 @@ function SoldCard({ activity, roomState, compact }: FeedEventCardProps & { compa
   return (
     <div className={`ref-card border border-green-500/20 ${compact ? "p-2" : "p-3"}`}>
       <div className="flex items-start gap-2">
-        <TeamLogo teamId={team.id} logoUrl={team.logoUrl} shortName={team.shortName} size={compact ? 28 : 36} />
+        <TeamLogo teamId={team.id} logoUrl={team.logoUrl} shortName={team.shortName} size={compact ? 28 : 36} league={league} />
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             {!compact && <span className="text-[10px] text-gray-400">{team.ownerName}</span>}
             <span className="ref-pill bg-green-600 text-white text-[8px] border-0">SOLD 🏆</span>
           </div>
           <div className={`font-bold text-pink-400 mt-0.5 ${compact ? "text-xs" : "text-sm"}`}>{activity.playerName}</div>
-          <div className={`font-black text-[#22C55E] ${compact ? "text-sm" : "text-lg"}`}>{formatPrice(activity.price || 0)}</div>
+          <div className={`font-black text-[#22C55E] ${compact ? "text-sm" : "text-lg"}`}>{formatLeaguePrice(activity.price || 0, league)}</div>
           {flavor && <div className="text-[10px] text-gray-500 mt-1 italic">{flavor}</div>}
         </div>
       </div>
@@ -96,7 +97,7 @@ function DraftPickCard({ activity, roomState, compact }: FeedEventCardProps & { 
   if (!activity.playerName) return null;
   return (
     <div className={`ref-card border border-ipl-gold/30 flex items-center gap-2 ${compact ? "p-2" : "p-2.5"}`}>
-      {team && <TeamLogo teamId={team.id} logoUrl={team.logoUrl} shortName={team.shortName} size={compact ? 24 : 28} />}
+      {team && <TeamLogo teamId={team.id} logoUrl={team.logoUrl} shortName={team.shortName} size={compact ? 24 : 28} league={roomState.league ?? "ipl"} />}
       <div className={`flex-1 min-w-0 ${compact ? "text-[10px]" : "text-[11px]"}`}>
         <span className="text-ipl-gold font-bold">{team?.shortName || activity.displayName}</span>
         <span className="text-gray-300"> drafted </span>

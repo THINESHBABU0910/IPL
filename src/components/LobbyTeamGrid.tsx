@@ -57,7 +57,7 @@ export default function LobbyTeamGrid({
                   : vacant ? "ring-2 ring-amber-500 ring-offset-1 ring-offset-[#1A1A1A]"
                   : ""
               }`}>
-                <TeamLogo teamId={team.id} logoUrl={team.logoUrl} shortName={team.shortName} size={36} />
+                <TeamLogo teamId={team.id} logoUrl={team.logoUrl} shortName={team.shortName} size={36} league={league} />
                 {vacant && (
                   <span className="absolute -top-1 -right-1 text-[7px] bg-amber-500 text-black font-black px-1 rounded">OPEN</span>
                 )}

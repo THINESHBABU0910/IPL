@@ -109,8 +109,10 @@ export interface ParticipantInfo {
 }
 
 export type GamePhase = "lobby" | "retention" | "auction" | "draft" | "catchup" | "completed";
-export type AuctionMode = "mega" | "custom_retention" | "flex_retention";
+export type AuctionMode = "mega" | "custom_retention" | "flex_retention" | "legend";
 export type LeagueId = "ipl" | "wpl" | "hundred" | "sa20" | "bbl" | "wbbl";
+/** Player pool file id — legend uses IPL teams but a separate player list */
+export type PlayerPoolId = LeagueId | "legend";
 export type GameType = "auction" | "draft";
 export type DraftGender = "mens" | "womens";
 

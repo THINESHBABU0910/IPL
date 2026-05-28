@@ -109,11 +109,20 @@ export function getBidIncrementLabel(currentBidLakhs: number): string {
   return "₹5 Cr+: +₹25 L per bid";
 }
 
+export function isLegendMode(mode: string): boolean {
+  return mode === "legend";
+}
+
 export function isRetentionMode(mode: string): boolean {
   return mode === "custom_retention" || mode === "flex_retention";
 }
 
+export function isMegaStylePool(mode: string): boolean {
+  return mode === "mega" || isLegendMode(mode);
+}
+
 export function isRtmAllowed(mode: string): boolean {
+  if (isLegendMode(mode)) return false;
   return mode === "mega" || isRetentionMode(mode);
 }
 
@@ -248,9 +257,9 @@ export function formatPrice(lakhs: number): string {
   return `${lakhs} L`;
 }
 
-export function sortSetKey(setStr: string): number {
-  for (let i = 0; i < SET_ORDER_PREFIXES.length; i++) {
-    const prefix = SET_ORDER_PREFIXES[i];
+export function sortSetKey(setStr: string, orderPrefixes: readonly string[] = SET_ORDER_PREFIXES): number {
+  for (let i = 0; i < orderPrefixes.length; i++) {
+    const prefix = orderPrefixes[i];
     if (setStr.startsWith(prefix)) {
       const num = parseInt(setStr.slice(prefix.length)) || 0;
       return i * 100 + num;
@@ -258,6 +267,11 @@ export function sortSetKey(setStr: string): number {
   }
   return 9999;
 }
+
+/** Legend auction set order: IPL legends → international → role buckets (10-team scale) */
+export const LEGEND_SET_ORDER_PREFIXES = [
+  "IL", "INT", "BA", "AL", "WK", "FA", "SP",
+] as const;
 
 export const IPL_RULES_SUMMARY = {
   purse: "₹120 Cr per franchise (mega auction cycle)",

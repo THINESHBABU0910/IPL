@@ -16,7 +16,9 @@
     "sync-squads": "node scripts/sync-squad-teams-2026.mjs",
     "download-logos": "node scripts/download-logos.mjs",
     "generate-league-players": "node scripts/generate-league-players.mjs",
-    "download-league-logos": "node scripts/download-league-logos.mjs"
+    "rebuild-all-pools": "node scripts/rebuild-all-player-pools.mjs",
+    "download-league-logos": "node scripts/download-league-logos.mjs",
+    "download-all-logos": "node scripts/download-all-logos.mjs"
   },
   "dependencies": {
     "@types/express": "^5.0.0",

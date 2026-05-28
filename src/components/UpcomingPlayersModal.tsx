@@ -2,8 +2,9 @@
 
 import { useMemo, useState } from "react";
 import { RoomState, Player } from "@/lib/types";
-import { sortSetKey } from "@/lib/constants";
+import { sortSetKey, LEGEND_SET_ORDER_PREFIXES } from "@/lib/constants";
 import { getSetShortLabel } from "@/data/playerLoader";
+import { getPlayerPoolId } from "@/lib/legendRules";
 import { motion, AnimatePresence } from "framer-motion";
 
 const ROLE_LABELS: Record<string, string> = {
@@ -21,7 +22,10 @@ interface UpcomingPlayersModalProps {
 
 type TabId = "up" | "sold" | "unsold";
 
-function groupBySetOrder(players: Player[]): { setName: string; players: Player[] }[] {
+function groupBySetOrder(
+  players: Player[],
+  orderPrefixes?: readonly string[],
+): { setName: string; players: Player[] }[] {
   const map = new Map<string, Player[]>();
   for (const p of players) {
     const set = p.set || "Other";
@@ -29,12 +33,15 @@ function groupBySetOrder(players: Player[]): { setName: string; players: Player[
     map.get(set)!.push(p);
   }
   return Array.from(map.entries())
-    .sort(([a], [b]) => sortSetKey(a) - sortSetKey(b))
+    .sort(([a], [b]) => sortSetKey(a, orderPrefixes) - sortSetKey(b, orderPrefixes))
     .map(([setName, list]) => ({ setName, players: list }));
 }
 
 export default function UpcomingPlayersModal({ roomState, open, onClose }: UpcomingPlayersModalProps) {
   const [tab, setTab] = useState<TabId>("up");
+  const league = roomState.league ?? "ipl";
+  const poolId = getPlayerPoolId(league, roomState.mode);
+  const setPrefixes = poolId === "legend" ? LEGEND_SET_ORDER_PREFIXES : undefined;
 
   const sold = roomState.auction.soldPlayers.map((s) => s.player);
   const unsold = roomState.auction.unsoldPlayers;
@@ -44,10 +51,10 @@ export default function UpcomingPlayersModal({ roomState, open, onClose }: Upcom
       if (roomState.upcomingPreviewBySet?.length) {
         return roomState.upcomingPreviewBySet;
       }
-      return groupBySetOrder(roomState.upcomingPreview || []);
+      return groupBySetOrder(roomState.upcomingPreview || [], setPrefixes);
     }
-    return groupBySetOrder(tab === "sold" ? sold : unsold);
-  }, [tab, roomState.upcomingPreviewBySet, roomState.upcomingPreview, sold, unsold]);
+    return groupBySetOrder(tab === "sold" ? sold : unsold, setPrefixes);
+  }, [tab, roomState.upcomingPreviewBySet, roomState.upcomingPreview, sold, unsold, setPrefixes]);
 
   const counts = { up: roomState.poolRemaining, sold: sold.length, unsold: unsold.length };
 
@@ -104,7 +111,7 @@ export default function UpcomingPlayersModal({ roomState, open, onClose }: Upcom
                 <div key={setName}>
                   <div className="flex items-center gap-2 mb-1.5">
                     <span className="ref-pill ref-pill-orange text-[9px]" title={setName}>
-                      {getSetShortLabel(setName)}
+                      {getSetShortLabel(setName, poolId)}
                     </span>
                     <span className="text-[10px] text-gray-500 font-mono">{setName}</span>
                     <span className="text-[10px] text-gray-500">{players.length} players</span>

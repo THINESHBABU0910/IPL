@@ -1,6 +1,8 @@
 import { Player } from "./types";
 import { sortSetKey, seededShuffle, seededRandomInt } from "./iplRules";
 
+export type SetOrderPrefixes = readonly string[];
+
 export interface PoolMeta {
   setOrder: string[];
   setQueues: Record<string, Player[]>;
@@ -9,8 +11,12 @@ export interface PoolMeta {
   pickCounter: number;
 }
 
-/** Build IPL-ordered sets (Marquee/BA/AL/...) with shuffled players inside each set */
-export function buildSetQueues(players: Player[], shuffleSeed: string): PoolMeta {
+/** Build ordered sets with shuffled players inside each set */
+export function buildSetQueues(
+  players: Player[],
+  shuffleSeed: string,
+  orderPrefixes?: SetOrderPrefixes,
+): PoolMeta {
   const bySet = new Map<string, Player[]>();
   for (const p of players) {
     const setName = p.set || "OTHER";
@@ -18,7 +24,9 @@ export function buildSetQueues(players: Player[], shuffleSeed: string): PoolMeta
     bySet.get(setName)!.push(p);
   }
 
-  const setOrder = [...bySet.keys()].sort((a, b) => sortSetKey(a) - sortSetKey(b));
+  const setOrder = [...bySet.keys()].sort(
+    (a, b) => sortSetKey(a, orderPrefixes) - sortSetKey(b, orderPrefixes),
+  );
   const setQueues: Record<string, Player[]> = {};
 
   for (const setName of setOrder) {

@@ -83,7 +83,7 @@ export default function AuctionChatTab({
           return (
             <div key={item.id} className="flex items-start gap-2 text-[11px]">
               {team && (
-                <TeamLogo teamId={team.id} logoUrl={team.logoUrl} shortName={team.shortName} size={20} />
+                <TeamLogo teamId={team.id} logoUrl={team.logoUrl} shortName={team.shortName} size={20} league={roomState.league ?? "ipl"} />
               )}
               <div className="min-w-0 flex-1">
                 <span className="text-[#FFD700] font-bold">{item.name}</span>

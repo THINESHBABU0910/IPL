@@ -2,6 +2,7 @@ import { Player, BidResult } from "../lib/types";
 import {
   calculateBidIncrement, calculateNextBid, getOverseasBidCapLakhs,
   TIMER_BID_RESET, ROUND2_DISCOUNT, formatPrice, validateRtmCapLimits,
+  isLegendMode, LEGEND_SET_ORDER_PREFIXES,
 } from "../lib/iplRules";
 import { calculateNextBidForLeague, formatLeaguePrice } from "../lib/leagueRules";
 import { getRoomRules, getRoomLeague } from "./leagueHelpers";
@@ -30,6 +31,10 @@ function syncRemainingPool(room: Room): void {
   }
 }
 
+function getSetOrderPrefixes(room: Room): readonly string[] | undefined {
+  return isLegendMode(room.mode) ? LEGEND_SET_ORDER_PREFIXES : getRoomRules(room).setOrderPrefixes;
+}
+
 export function presentNextPlayer(room: Room): Player | null {
   const { auction } = room;
 
@@ -37,7 +42,7 @@ export function presentNextPlayer(room: Room): Player | null {
     if (auction.round === 1 && auction.unsoldPlayers.length > 0) {
       auction.round = 2;
       const discounted = auction.unsoldPlayers.map((p) => applyRound2Discount(room, p));
-      room.poolMeta = buildSetQueues(discounted, `${room.id}-round2-${Date.now()}`);
+      room.poolMeta = buildSetQueues(discounted, `${room.id}-round2-${Date.now()}`, getSetOrderPrefixes(room));
       auction.unsoldPlayers = [];
       syncRemainingPool(room);
     } else {
@@ -52,7 +57,7 @@ export function presentNextPlayer(room: Room): Player | null {
     if (auction.round === 1 && auction.unsoldPlayers.length > 0) {
       auction.round = 2;
       const discounted = auction.unsoldPlayers.map((p) => applyRound2Discount(room, p));
-      room.poolMeta = buildSetQueues(discounted, `${room.id}-round2-${Date.now()}`);
+      room.poolMeta = buildSetQueues(discounted, `${room.id}-round2-${Date.now()}`, getSetOrderPrefixes(room));
       auction.unsoldPlayers = [];
       syncRemainingPool(room);
       return presentNextPlayer(room);
@@ -105,7 +110,7 @@ export function processBid(room: Room, teamId: string): BidResult {
   if (overseasCap !== null && bidAmount > overseasCap) {
     return {
       success: false,
-      reason: `Overseas max fee is ${formatPrice(overseasCap)}`,
+      reason: `Overseas max fee is ${formatLeaguePrice(overseasCap, league)}`,
     };
   }
 
@@ -177,6 +182,7 @@ export function markUnsold(room: Room): Player | null {
 }
 
 export function checkRTM(room: Room, player: Player, buyerTeamId: string, salePrice: number): string | null {
+  if (room.mode === "legend") return null;
   const prevTeam = player.previousTeam;
   if (!prevTeam || prevTeam === "None" || prevTeam === buyerTeamId) return null;
 

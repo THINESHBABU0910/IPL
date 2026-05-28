@@ -1,8 +1,7 @@
 "use client";
 
 import { Player, RoomState } from "@/lib/types";
-import { formatPrice } from "@/lib/constants";
-import { calculateNextBid } from "@/lib/iplRules";
+import { calculateNextBidForLeague, formatLeaguePrice } from "@/lib/leagueRules";
 import { Socket } from "socket.io-client";
 import { motion, AnimatePresence } from "framer-motion";
 import TeamLogo from "./TeamLogo";
@@ -30,11 +29,12 @@ interface AuctionOverlaysProps {
 export default function AuctionOverlays({
   roomState, socket, myTeamId, soldInfo, unsoldPlayer, rtmInfo,
 }: AuctionOverlaysProps) {
+  const league = roomState.league ?? "ipl";
   const phase = rtmInfo?.phase || "offer";
   const isRtmTeam = rtmInfo && rtmInfo.teamId === myTeamId;
   const isWinningBidder = rtmInfo?.winningBidder === myTeamId;
   const displayPrice = rtmInfo?.escalatedPrice ?? rtmInfo?.price ?? 0;
-  const nextRaise = calculateNextBid(displayPrice);
+  const nextRaise = calculateNextBidForLeague(displayPrice, league);
 
   return (
     <>
@@ -46,8 +46,8 @@ export default function AuctionOverlays({
               <div className="text-5xl font-black text-green-400">SOLD!</div>
               <div className="text-lg text-white font-bold mt-1">{soldInfo.player.name}</div>
               <div className="flex items-center justify-center gap-2 text-base mt-2">
-                <TeamLogo teamId={soldInfo.teamId} logoUrl={roomState.teams[soldInfo.teamId]?.logoUrl || ""} shortName={roomState.teams[soldInfo.teamId]?.shortName || ""} size={28} />
-                <span className="text-[#FFD700] font-bold">{formatPrice(soldInfo.price)}</span>
+                <TeamLogo teamId={soldInfo.teamId} logoUrl={roomState.teams[soldInfo.teamId]?.logoUrl || ""} shortName={roomState.teams[soldInfo.teamId]?.shortName || ""} size={28} league={league} />
+                <span className="text-[#FFD700] font-bold">{formatLeaguePrice(soldInfo.price, league)}</span>
               </div>
             </div>
           </motion.div>
@@ -77,9 +77,9 @@ export default function AuctionOverlays({
                 {phase === "match" && "RTM — Match Price"}
               </div>
               <div className="text-lg font-bold">{rtmInfo.player.name}</div>
-              <div className="text-2xl font-bold text-[#FFD700]">{formatPrice(displayPrice)}</div>
+              <div className="text-2xl font-bold text-[#FFD700]">{formatLeaguePrice(displayPrice, league)}</div>
               {phase === "escalate" && !rtmInfo.raiseUsed && (
-                <div className="text-xs text-gray-400 mt-1">Raise to {formatPrice(nextRaise)}</div>
+                <div className="text-xs text-gray-400 mt-1">Raise to {formatLeaguePrice(nextRaise, league)}</div>
               )}
               <div className="text-3xl font-mono font-bold text-red-400 my-3">{rtmInfo.seconds}s</div>
 
@@ -93,7 +93,7 @@ export default function AuctionOverlays({
               {phase === "escalate" && isWinningBidder && !rtmInfo.raiseUsed && (
                 <div className="flex gap-2">
                   <button type="button" onClick={() => socket.emit("rtm-raise")} className="flex-1 py-2.5 bg-[#FFD700] text-black rounded-lg font-bold text-sm">
-                    RAISE ({formatPrice(nextRaise)})
+                    RAISE ({formatLeaguePrice(nextRaise, league)})
                   </button>
                   <button type="button" onClick={() => socket.emit("rtm-skip-raise")} className="flex-1 py-2.5 bg-gray-600 rounded-lg font-bold text-sm">SKIP</button>
                 </div>

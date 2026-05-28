@@ -1,12 +1,15 @@
-import { Player, PlayerJSON, PlayersData, LeagueId } from "@/lib/types";
-import { formatPrice, sortSetKey } from "@/lib/constants";
+import { Player, PlayerJSON, PlayersData, LeagueId, PlayerPoolId } from "@/lib/types";
+import { formatPrice, sortSetKey, LEGEND_SET_ORDER_PREFIXES } from "@/lib/constants";
 import { formatLeaguePrice } from "@/lib/leagueRules";
+import { getLeagueConfig } from "@/data/leagueRegistry";
+import { getPlayerPoolId } from "@/lib/legendRules";
 import playersRaw from "./players.json";
 import wplPlayersRaw from "./leagues/wpl/players.json";
 import hundredPlayersRaw from "./leagues/hundred/players.json";
 import sa20PlayersRaw from "./leagues/sa20/players.json";
 import bblPlayersRaw from "./leagues/bbl/players.json";
 import wbblPlayersRaw from "./leagues/wbbl/players.json";
+import legendPlayersRaw from "./leagues/legend/players.json";
 import { RETENTIONS_2026, PURSE_REMAINING_2026 } from "./retentions2026";
 import { filterExcludedCountries } from "@/lib/playerFilter";
 
@@ -19,8 +22,31 @@ const LEAGUE_DATA: Record<LeagueId, PlayersData> = {
   wbbl: wbblPlayersRaw as PlayersData,
 };
 
+const POOL_DATA: Record<PlayerPoolId, PlayersData> = {
+  ...LEAGUE_DATA,
+  legend: legendPlayersRaw as PlayersData,
+};
+
+const setToCategoryByPool = new Map<PlayerPoolId, Map<string, string>>();
+
+function getSetCategoryMap(poolId: PlayerPoolId): Map<string, string> {
+  let map = setToCategoryByPool.get(poolId);
+  if (!map) {
+    map = new Map<string, string>();
+    for (const cat of POOL_DATA[poolId].categories) {
+      for (const setName of cat.sets) {
+        map.set(setName, cat.name);
+      }
+    }
+    setToCategoryByPool.set(poolId, map);
+  }
+  return map;
+}
+
 function normalizePlayer(p: PlayerJSON, league: LeagueId = "ipl"): Player {
-  const basePriceLakhs = p.basePrice / 100000;
+  const minBase = getLeagueConfig(league).rules.minBasePriceLakhs;
+  const rawLakhs = p.basePrice / 100000;
+  const basePriceLakhs = Number.isFinite(rawLakhs) && rawLakhs >= minBase ? rawLakhs : minBase;
   return {
     ...p,
     basePriceLakhs,
@@ -28,42 +54,54 @@ function normalizePlayer(p: PlayerJSON, league: LeagueId = "ipl"): Player {
   };
 }
 
+function loadPoolPlayers(poolId: PlayerPoolId): Player[] {
+  const priceLeague: LeagueId = poolId === "legend" ? "ipl" : poolId;
+  return filterExcludedCountries(POOL_DATA[poolId].players).map((p) => normalizePlayer(p, priceLeague));
+}
+
 function loadLeaguePlayers(league: LeagueId): Player[] {
-  return filterExcludedCountries(LEAGUE_DATA[league].players).map((p) => normalizePlayer(p, league));
+  return loadPoolPlayers(league);
 }
 
 const data = playersRaw as PlayersData;
 const allPlayers: Player[] = loadLeaguePlayers("ipl");
 
-// Build sorted unique set names from data
+// Build sorted unique set names from IPL data
 const uniqueSets = Array.from(new Set(allPlayers.map((p) => p.set)));
 uniqueSets.sort((a, b) => sortSetKey(a) - sortSetKey(b));
 
-const setToCategory = new Map<string, string>();
-for (const cat of data.categories) {
-  for (const setName of cat.sets) {
-    setToCategory.set(setName, cat.name);
-  }
+/** e.g. BA1 → "Marquee Players", IL1 → "IPL Legends" */
+export function getSetDisplayLabel(setName: string, poolId: PlayerPoolId = "ipl"): string {
+  return getSetCategoryMap(poolId).get(setName) || setName;
 }
 
-/** e.g. BA1 → "Marquee Players", AL2 → "All-Rounders" */
-export function getSetDisplayLabel(setName: string): string {
-  return setToCategory.get(setName) || setName;
-}
-
-/** Short badge: BA1 → "Marquee", AL1 → "All-Rounders" */
-export function getSetShortLabel(setName: string): string {
-  const full = setToCategory.get(setName);
+/** Short badge: BA1 → "Marquee", IL1 → "IPL Legends" */
+export function getSetShortLabel(setName: string, poolId: PlayerPoolId = "ipl"): string {
+  const full = getSetCategoryMap(poolId).get(setName);
   if (!full) return setName;
   if (full === "Marquee Players") return setName.startsWith("M2") ? "Marquee · Set 2" : setName.startsWith("M1") ? "Marquee · Set 1" : "Marquee";
-  if (full === "Wicket-Keepers") return "Wicketkeepers";
-  if (full === "Spin Bowlers") return "Spinners";
-  if (full === "Fast Bowlers") return "Fast Bowlers";
-  return full.replace(/ Players$/, "");
+  if (full === "IPL Legends") return setName.startsWith("IL2") ? "IPL Legends · Set 2" : "IPL Legends · Set 1";
+  if (full === "International Legends") return setName.startsWith("INT2") ? "Intl Legends · Set 2" : "Intl Legends · Set 1";
+  if (full === "Wicket-Keepers" || full === "Legend Wicket-Keepers") return "Wicketkeepers";
+  if (full === "Spin Bowlers" || full === "Legend Spinners") return "Spinners";
+  if (full === "Fast Bowlers" || full === "Legend Fast Bowlers") return "Fast Bowlers";
+  return full.replace(/ Players$/, "").replace(/^Legend /, "");
 }
 
 export function getAllPlayers(league: LeagueId = "ipl"): Player[] {
   return loadLeaguePlayers(league);
+}
+
+export function getAllPlayersForPool(poolId: PlayerPoolId): Player[] {
+  return loadPoolPlayers(poolId);
+}
+
+export function getPlayersForRoom(league: LeagueId, mode: string): Player[] {
+  return loadPoolPlayers(getPlayerPoolId(league, mode as import("@/lib/types").AuctionMode));
+}
+
+export function getLegendPlayerCount(): number {
+  return POOL_DATA.legend.players.length;
 }
 
 export function getPlayersForTeam(teamId: string, league: LeagueId = "ipl"): Player[] {

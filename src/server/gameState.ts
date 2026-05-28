@@ -2,7 +2,7 @@ import {
 
   Player, PlayerJSON, PlayersData, TeamState, AuctionState, RoomState,
 
-  AuctionMode, ChatMessage, ActivityEntry, ParticipantInfo, TeamDef, RuntimeStatePayload, LeagueId,
+  AuctionMode, ChatMessage, ActivityEntry, ParticipantInfo, TeamDef, RuntimeStatePayload, LeagueId, PlayerPoolId,
 
   GameType, DraftGender, DraftState, DraftTeamSlot,
 
@@ -33,8 +33,8 @@ import {
 } from "./leagueHelpers";
 
 import { buildSetQueues, countPoolRemaining, previewBySet, flattenQueues, PoolMeta } from "../lib/auctionPool";
-
-import { IPL_TEAMS } from "../data/teams";
+import { isLegendMode, isMegaStylePool, LEGEND_SET_ORDER_PREFIXES } from "../lib/iplRules";
+import { getPlayerPoolId } from "../lib/legendRules";
 
 import * as fs from "fs";
 
@@ -46,11 +46,15 @@ import { randomBytes } from "crypto";
 
 // ---------- Player loading ----------
 
-const playersCacheByLeague = new Map<LeagueId, Player[]>();
-const playerByIdCacheByLeague = new Map<LeagueId, Map<string, Player>>();
+const playersCacheByPool = new Map<PlayerPoolId, Player[]>();
+const playerByIdCacheByPool = new Map<PlayerPoolId, Map<string, Player>>();
 
-function resolvePlayersPath(league: LeagueId): string {
-  const file = league === "ipl" ? "players.json" : `leagues/${league}/players.json`;
+function resolvePlayersPath(poolId: PlayerPoolId): string {
+  const file = poolId === "ipl"
+    ? "players.json"
+    : poolId === "legend"
+      ? "leagues/legend/players.json"
+      : `leagues/${poolId}/players.json`;
   const candidates = [
     path.join(process.cwd(), "src", "data", file),
     path.join(__dirname, "..", "data", file),
@@ -59,36 +63,50 @@ function resolvePlayersPath(league: LeagueId): string {
   for (const p of candidates) {
     if (fs.existsSync(p)) return p;
   }
-  throw new Error(`Could not find players file for league ${league}`);
+  throw new Error(`Could not find players file for pool ${poolId}`);
 }
 
-export function loadPlayersForLeague(league: LeagueId = "ipl"): Player[] {
-  const cached = playersCacheByLeague.get(league);
+export function loadPlayersForPool(poolId: PlayerPoolId = "ipl"): Player[] {
+  const cached = playersCacheByPool.get(poolId);
   if (cached) return cached;
 
-  const raw = fs.readFileSync(resolvePlayersPath(league), "utf-8");
+  const priceLeague: LeagueId = poolId === "legend" ? "ipl" : poolId;
+  const minBaseLakhs = getLeagueConfig(priceLeague).rules.minBasePriceLakhs;
+  const raw = fs.readFileSync(resolvePlayersPath(poolId), "utf-8");
   const data = JSON.parse(raw) as PlayersData;
   const players = filterExcludedCountries(data.players).map((pl: PlayerJSON) => {
-    const basePriceLakhs = pl.basePrice / 100000;
-    return { ...pl, basePriceLakhs, displayPrice: formatLeaguePrice(basePriceLakhs, league) };
+    const rawLakhs = pl.basePrice / 100000;
+    const basePriceLakhs = Number.isFinite(rawLakhs) && rawLakhs >= minBaseLakhs
+      ? rawLakhs
+      : minBaseLakhs;
+    return { ...pl, basePriceLakhs, displayPrice: formatLeaguePrice(basePriceLakhs, priceLeague) };
   });
-  playersCacheByLeague.set(league, players);
-  playerByIdCacheByLeague.set(league, new Map(players.map((pl) => [pl.id, pl])));
+  playersCacheByPool.set(poolId, players);
+  playerByIdCacheByPool.set(poolId, new Map(players.map((pl) => [pl.id, pl])));
   return players;
+}
+
+/** @deprecated Use loadPlayersForPool */
+export function loadPlayersForLeague(league: LeagueId = "ipl"): Player[] {
+  return loadPlayersForPool(league);
+}
+
+export function loadPlayersForRoom(room: { league?: LeagueId; mode: AuctionMode }): Player[] {
+  return loadPlayersForPool(getPlayerPoolId(getRoomLeague(room), room.mode));
 }
 
 function loadPlayersFromDisk(): Player[] {
   return loadPlayersForLeague("ipl");
 }
 
-function getPlayerById(id: string, league: LeagueId = "ipl"): Player | undefined {
-  loadPlayersForLeague(league);
-  return playerByIdCacheByLeague.get(league)?.get(String(id).trim());
+function getPlayerById(id: string, poolId: PlayerPoolId = "ipl"): Player | undefined {
+  loadPlayersForPool(poolId);
+  return playerByIdCacheByPool.get(poolId)?.get(String(id).trim());
 }
 
-function resolvePlayersByIds(ids: string[], league: LeagueId = "ipl"): { found: Player[]; missing: string[] } {
-  const all = loadPlayersForLeague(league);
-  const cache = playerByIdCacheByLeague.get(league);
+function resolvePlayersByIds(ids: string[], poolId: PlayerPoolId = "ipl"): { found: Player[]; missing: string[] } {
+  const all = loadPlayersForPool(poolId);
+  const cache = playerByIdCacheByPool.get(poolId);
   const found: Player[] = [];
   const missing: string[] = [];
   const uniqueIds = [...new Set(ids.map((id) => String(id).trim()).filter(Boolean))];
@@ -133,10 +151,6 @@ function normalizeCustomPrices(
 function isFlexRetentionMode(room: Room): boolean {
   return room.mode === "flex_retention";
 }
-
-
-
-const TEAM_MAP = new Map(IPL_TEAMS.map((t) => [t.id, t]));
 
 
 
@@ -297,7 +311,7 @@ export function createRoom(
 
     cleanupTimer: null,
 
-    retentionTimeLeft: 180,
+    retentionTimeLeft: getLeagueConfig(leagueId).rules.retentionTimer,
 
     minTeamsToStart: isDraft ? 2 : maxFranchises,
 
@@ -964,11 +978,12 @@ export function lockRetentions(
     return null;
   }
 
-  const allPlayers = loadPlayersForLeague(getRoomLeague(room));
+  const poolId = getPlayerPoolId(getRoomLeague(room), room.mode);
+  const allPlayers = loadPlayersForPool(poolId);
   let selected: Player[];
 
   if (flexMode) {
-    const { found, missing } = resolvePlayersByIds(normalizedIds, getRoomLeague(room));
+    const { found, missing } = resolvePlayersByIds(normalizedIds, poolId);
     if (missing.length) {
       return `Unknown player ID(s): ${missing.join(", ")}`;
     }
@@ -1054,17 +1069,20 @@ export function allRetentionsLocked(room: Room): boolean {
 
 export function setupAuctionPool(room: Room): void {
 
-  const allPlayers = loadPlayersForLeague(getRoomLeague(room));
+  const allPlayers = loadPlayersForRoom(room);
+  const setPrefixes = isLegendMode(room.mode)
+    ? LEGEND_SET_ORDER_PREFIXES
+    : getRoomRules(room).setOrderPrefixes;
 
   let poolPlayers: Player[];
 
-  if (room.mode === "mega") {
+  if (isMegaStylePool(room.mode)) {
 
     poolPlayers = allPlayers;
 
     for (const team of room.teams.values()) {
       team.purse = getRoomTotalPurse(room);
-      team.rtmCards = getInitialRtmCardsForLeague(getRoomLeague(room), "mega", 0);
+      team.rtmCards = getInitialRtmCardsForLeague(getRoomLeague(room), room.mode, 0);
     }
 
   } else {
@@ -1081,7 +1099,11 @@ export function setupAuctionPool(room: Room): void {
 
   }
 
-  room.poolMeta = buildSetQueues(poolPlayers, `${room.id}-r${room.auction.round}-${Date.now()}`);
+  room.poolMeta = buildSetQueues(
+    poolPlayers,
+    `${room.id}-r${room.auction.round}-${Date.now()}`,
+    setPrefixes,
+  );
   room.auction.remainingPool = flattenQueues(room.poolMeta);
 
 }
@@ -1114,7 +1136,7 @@ export function resetRoomForRematch(room: Room): void {
 
   room.auctionActivities = [];
 
-  room.retentionTimeLeft = 180;
+  room.retentionTimeLeft = getRoomRules(room).retentionTimer;
 
 
 
@@ -1225,10 +1247,12 @@ export function importRoomFromSnapshot(raw: Record<string, unknown>): Room | nul
     const remainingIds = (auctionRaw.remainingPoolIds as string[]) || [];
     delete auctionRaw.remainingPoolIds;
 
-    loadPlayersForLeague(parseLeagueId(raw.league));
     const leagueId = parseLeagueId(raw.league);
+    const mode = (raw.mode as AuctionMode) || "mega";
+    const poolId = getPlayerPoolId(leagueId, mode);
+    loadPlayersForPool(poolId);
     const remainingPool = remainingIds
-      .map((pid) => playerByIdCacheByLeague.get(leagueId)?.get(pid))
+      .map((pid) => playerByIdCacheByPool.get(poolId)?.get(pid))
       .filter((p): p is Player => !!p);
 
     const room: Room = {
@@ -1294,6 +1318,6 @@ export function importRoomFromSnapshot(raw: Record<string, unknown>): Room | nul
 
 export type { TeamDef };
 
-export { loadPlayersFromDisk, IPL_TEAMS as TEAM_DEFS, rooms };
+export { loadPlayersFromDisk, rooms };
 
 

@@ -184,6 +184,24 @@ body {
   .action-pill-active { @apply bg-gradient-to-r from-[#F97316] to-[#DC2626] text-white; }
   .action-pill-inactive { @apply text-gray-400; }
 
+  .league-card {
+    @apply flex items-center gap-2 p-2.5 rounded-xl border transition-all duration-200;
+  }
+
+  .league-card-selected {
+    border-color: rgba(255, 215, 0, 0.6);
+    @apply bg-gradient-to-br from-yellow-500/10 to-purple-900/15;
+  }
+
+  .league-card-unselected {
+    background-color: rgba(26, 26, 26, 0.7);
+    @apply border-[#2A2A2A] hover:border-[#3A3A3A];
+  }
+
+  .home-hero {
+    @apply max-w-full;
+  }
+
   .tab-badge {
     @apply absolute -top-0.5 right-1/4 min-w-[16px] h-4 px-1 rounded-full text-[9px] font-bold flex items-center justify-center bg-[#F97316] text-white;
   }

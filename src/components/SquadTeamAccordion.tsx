@@ -3,7 +3,8 @@
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { RoomState } from "@/lib/types";
-import { formatPrice, MAX_OVERSEAS, MAX_SQUAD_SIZE } from "@/lib/constants";
+import { formatLeaguePrice } from "@/lib/leagueRules";
+import { getLeagueConfig } from "@/data/leagueRegistry";
 import { DRAFT_SQUAD_MAX } from "@/lib/draftRules";
 import TeamLogo from "./TeamLogo";
 import {
@@ -26,8 +27,12 @@ export default function SquadTeamAccordion({
   roomState, myTeamId, playerName, isHost, defaultExpandedId, showActions = false,
 }: SquadTeamAccordionProps) {
   const isDraft = roomState.gameType === "draft";
+  const league = roomState.league ?? "ipl";
+  const leagueRules = getLeagueConfig(league).rules;
   const teamIds = getSortedTeamIds(roomState, myTeamId);
-  const maxSquad = isDraft ? DRAFT_SQUAD_MAX : MAX_SQUAD_SIZE;
+  const maxSquad = isDraft ? DRAFT_SQUAD_MAX : leagueRules.maxSquadSize;
+  const maxOverseas = leagueRules.maxOverseas;
+  const totalPurse = leagueRules.totalPurse;
   const defaultId = defaultExpandedId
     ?? myTeamId
     ?? teamIds.find((id) => getTeamPlayers(id, roomState).length > 0)
@@ -56,7 +61,7 @@ export default function SquadTeamAccordion({
         players: allPlayers,
         soldPrices: getTeamSoldPrices(teamId, roomState),
         retainedIds,
-      }, `${team.shortName}-ipl2026-squad.png`);
+      }, `${team.shortName}-${league}-squad.png`);
       toast.success("Squad image saved!");
     } catch {
       toast.error("Could not save squad image");
@@ -84,7 +89,7 @@ export default function SquadTeamAccordion({
         players: allPlayers,
         soldPrices: getTeamSoldPrices(teamId, roomState),
         retainedIds,
-      }, `${team.shortName}-ipl2026-squad.png`);
+      }, `${team.shortName}-${league}-squad.png`);
       toast.success(result === "shared" ? "Squad shared!" : "Squad image saved!");
     } catch {
       toast.error("Could not share squad image");
@@ -129,7 +134,7 @@ export default function SquadTeamAccordion({
                   {teamIsHost && <span className="ref-pill ref-pill-purple text-[8px]">HOST</span>}
                 </div>
                 <div className="flex items-center gap-1.5 mt-0.5">
-                  <TeamLogo teamId={teamId} logoUrl={team.logoUrl} shortName={team.shortName} size={18} />
+                  <TeamLogo teamId={teamId} logoUrl={team.logoUrl} shortName={team.shortName} size={18} league={league} />
                   <span className="text-[10px] text-gray-400 truncate">{team.name}</span>
                   <span className="text-[10px] text-gray-500">· {allPlayers.length} players</span>
                 </div>
@@ -149,9 +154,9 @@ export default function SquadTeamAccordion({
                     <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px]">
                       {!isDraft && (
                         <>
-                          <span className="text-gray-400">OS: <span className="text-white font-bold">{overseas}/{MAX_OVERSEAS}</span></span>
-                          <span className="text-gray-400">Purse: <span className="text-[#22C55E] font-bold">{formatPrice(team.purse)}</span></span>
-                          <span className="text-gray-400">Spent: <span className="text-[#FFD700] font-bold">{formatPrice(spent)}</span></span>
+                          <span className="text-gray-400">OS: <span className="text-white font-bold">{overseas}/{maxOverseas}</span></span>
+                          <span className="text-gray-400">Purse: <span className="text-[#22C55E] font-bold">{formatLeaguePrice(team.purse, league)}</span></span>
+                          <span className="text-gray-400">Spent: <span className="text-[#FFD700] font-bold">{formatLeaguePrice(totalPurse - team.purse, league)}</span></span>
                         </>
                       )}
                       {isDraft && overseas > 0 && (
@@ -171,7 +176,7 @@ export default function SquadTeamAccordion({
                             const price = soldPrices[p.id];
                             const priceLabel = isDraft
                               ? "Drafted"
-                              : (price != null && price > 0 ? formatPrice(price) : p.displayPrice);
+                              : (price != null && price > 0 ? formatLeaguePrice(price, league) : p.displayPrice);
                             return (
                               <PlayerRow
                                 key={p.id}

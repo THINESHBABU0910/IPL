@@ -2,8 +2,10 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { RoomState } from "@/lib/types";
-import { formatLeaguePrice, getBidIncrementForLeague } from "@/lib/leagueRules";
+import { formatLeaguePrice, formatBidRaiseLabel, getBidIncrementForLeague } from "@/lib/leagueRules";
 import { getLeagueConfig } from "@/data/leagueRegistry";
+import { getSetShortLabel } from "@/data/playerLoader";
+import { getPlayerPoolId } from "@/lib/legendRules";
 import { Socket } from "socket.io-client";
 import { motion, AnimatePresence } from "framer-motion";
 import TeamLogo from "./TeamLogo";
@@ -47,6 +49,7 @@ export default function AuctionPlayerStrip({
   const bidTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const league = roomState.league ?? "ipl";
+  const poolId = getPlayerPoolId(league, roomState.mode);
   const totalPurse = getLeagueConfig(league).rules.totalPurse;
   const auction = roomState.auction;
   const myTeam = myTeamId ? roomState.teams[myTeamId] : null;
@@ -77,7 +80,7 @@ export default function AuctionPlayerStrip({
   const callout = hammerCall(timerSeconds);
   const bidIncrement = getBidIncrementForLeague(displayPrice, league);
   const bidLabel = isMyBid
-    ? `BID (+${bidIncrement}L)`
+    ? formatBidRaiseLabel(bidIncrement, league)
     : bidPending ? "..." : `BID ${formatLeaguePrice(nextAmount, league)}`;
 
   if (!currentPlayer) {
@@ -98,6 +101,7 @@ export default function AuctionPlayerStrip({
         <div className="flex items-start gap-2">
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-1.5 flex-wrap mb-1">
+              <span className="ref-pill ref-pill-orange text-[9px]">{getSetShortLabel(currentPlayer.set, poolId)}</span>
               <span className="ref-pill ref-pill-blue text-[9px]">{ROLE_LABELS[currentPlayer.role] || currentPlayer.role}</span>
               <span className="text-[10px] text-gray-400 border border-[#2A2A2A] rounded px-1">{countryCode(currentPlayer.country)}</span>
               {currentPlayer.isOverseas && <span className="ref-pill ref-pill-purple text-[9px]">OS</span>}
@@ -112,6 +116,7 @@ export default function AuctionPlayerStrip({
                   logoUrl={leadingTeam.logoUrl}
                   shortName={leadingTeam.shortName}
                   size={28}
+                  league={league}
                 />
               )}
               {isMyBid && <span className="text-[10px] text-green-400 font-bold">YOU</span>}
@@ -212,7 +217,7 @@ export function StickyBidBar({
         }`}
       >
         {isMyBid
-          ? `BID (+${bidIncrement}L)`
+          ? formatBidRaiseLabel(bidIncrement, league)
           : bidPending
             ? "RAISING..."
             : `BID ${formatLeaguePrice(nextAmount, league)}`}

@@ -55,7 +55,7 @@ export default function ParticipantsTab({
           return (
             <div key={p.socketId + p.playerName} className="ref-card flex items-center gap-3">
               {team ? (
-                <TeamLogo teamId={team.id} logoUrl={team.logoUrl} shortName={team.shortName} size={32} />
+                <TeamLogo teamId={team.id} logoUrl={team.logoUrl} shortName={team.shortName} size={32} league={roomState.league ?? "ipl"} />
               ) : (
                 <div className="w-8 h-8 rounded-full bg-[#2A2A2A] flex items-center justify-center text-gray-500 text-xs">?</div>
               )}

@@ -1,6 +1,6 @@
 import { TeamDef } from "@/lib/types";
 
-/** Official The Hundred franchise teams (8 teams) */
+/** The Hundred — 10 franchise teams (8 official + 2 expansion slots) */
 export const HUNDRED_TEAMS: TeamDef[] = [
   { id: "BPH", name: "Birmingham Phoenix", shortName: "BPH", primaryColor: "#E40046", secondaryColor: "#000000", logo: "BPH", logoUrl: "/logos/hundred/BPH.svg" },
   { id: "LNS", name: "London Spirit", shortName: "LNS", primaryColor: "#00843D", secondaryColor: "#FFFFFF", logo: "LNS", logoUrl: "/logos/hundred/LNS.svg" },
@@ -10,4 +10,6 @@ export const HUNDRED_TEAMS: TeamDef[] = [
   { id: "SOB", name: "Southern Brave", shortName: "SOB", primaryColor: "#C8102E", secondaryColor: "#000000", logo: "SOB", logoUrl: "/logos/hundred/SOB.svg" },
   { id: "TRT", name: "Trent Rockets", shortName: "TRT", primaryColor: "#00843D", secondaryColor: "#FFFFFF", logo: "TRT", logoUrl: "/logos/hundred/TRT.svg" },
   { id: "WEF", name: "Welsh Fire", shortName: "WEF", primaryColor: "#E40046", secondaryColor: "#FFD100", logo: "WEF", logoUrl: "/logos/hundred/WEF.svg" },
+  { id: "EDI", name: "Edinburgh Eagles", shortName: "EDI", primaryColor: "#003366", secondaryColor: "#C4A000", logo: "EDI", logoUrl: "/logos/hundred/EDI.svg" },
+  { id: "BRI", name: "Bristol Bears", shortName: "BRI", primaryColor: "#003087", secondaryColor: "#E40046", logo: "BRI", logoUrl: "/logos/hundred/BRI.svg" },
 ];
