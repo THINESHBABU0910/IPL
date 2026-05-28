@@ -7,6 +7,7 @@ import { SAMPLE_LEAGUE_SCORECARDS } from "@/data/sampleLeagueScorecards";
 import {
   computeStandingsFromScorecardText,
   formatNrr,
+  formatOversCricket,
 } from "@/lib/ai/scorecardStandings";
 
 const teamMeta = Object.fromEntries(IPL_TEAMS.map((t) => [t.id, t]));
@@ -64,17 +65,6 @@ export default function PointsTablePanel() {
           {result.errors.map((e, i) => (
             <div key={i}>{e}</div>
           ))}
-        </div>
-      )}
-
-      {result.warnings.length > 0 && (
-        <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[10px] text-amber-200/90 space-y-0.5 max-h-20 overflow-y-auto">
-          {result.warnings.slice(0, 8).map((w, i) => (
-            <div key={i}>{w}</div>
-          ))}
-          {result.warnings.length > 8 && (
-            <div className="text-gray-500">+{result.warnings.length - 8} more all-out NRR adjustments</div>
-          )}
         </div>
       )}
 
@@ -154,8 +144,8 @@ export default function PointsTablePanel() {
           </table>
         </div>
         <div className="px-3 py-2 text-[9px] text-gray-600 border-t border-[#2A2A2A] leading-relaxed">
-          IPL NRR: (Runs ÷ Overs faced) − (Runs conceded ÷ Overs bowled). All-out (10 wkts) = full 20 overs
-          for NRR. Win = 2 pts · Tie = 1 pt each. Sorted by Pts, then NRR.
+          NRR = (Runs ÷ Overs faced) − (Runs conceded ÷ Overs bowled). Uses only overs from the
+          scorecard (19.2 = 19 overs 2 balls). Win = 2 pts · Tie = 1 pt each.
         </div>
       </div>
 
@@ -173,11 +163,11 @@ export default function PointsTablePanel() {
               >
                 <div className="text-gray-500 mb-1">Match {m.matchNo}</div>
                 <div className={m.winnerId === a.teamId ? "text-green-400" : "text-gray-300"}>
-                  {metaA.shortName} {a.runs}/{a.wickets} ({a.overs} ov)
+                  {metaA.shortName} {a.runs}/{a.wickets} ({formatOversCricket(a.overs)} ov)
                   {m.winnerId === a.teamId ? " ✓" : ""}
                 </div>
                 <div className={m.winnerId === b.teamId ? "text-green-400" : "text-gray-300"}>
-                  {metaB.shortName} {b.runs}/{b.wickets} ({b.overs} ov)
+                  {metaB.shortName} {b.runs}/{b.wickets} ({formatOversCricket(b.overs)} ov)
                   {m.winnerId === b.teamId ? " ✓" : ""}
                 </div>
                 <div className="text-ipl-gold/80 mt-0.5">{teamMeta[m.winnerId].shortName} won · {m.margin}</div>

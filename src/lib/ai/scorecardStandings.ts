@@ -2,7 +2,7 @@ import { IPL_TEAMS } from "@/data/leagues/ipl/teams";
 
 export const IPL_TEAM_IDS = IPL_TEAMS.map((t) => t.id);
 
-/** T20 league — full quota used when innings ends all out (IPL playing conditions) */
+/** T20 league max overs per innings */
 export const T20_MAX_OVERS = 20;
 export const T20_ALL_OUT_WICKETS = 10;
 
@@ -27,10 +27,8 @@ export interface InningsLine {
   teamId: string;
   runs: number;
   wickets: number;
-  /** Actual overs batted (decimal) */
+  /** Overs batted/bowled — decimal for NRR (19.4 = 19 overs + 4 balls) */
   overs: number;
-  /** Overs used in NRR (full quota if all out) */
-  oversForNrr: number;
 }
 
 export interface ParsedMatch {
@@ -116,15 +114,18 @@ export function parseOversDecimal(raw: string, maxOvers = T20_MAX_OVERS): ParseO
   return { ok: true, overs: whole };
 }
 
-/** IPL: all-out innings count as full quota for NRR */
-export function effectiveOversForNrr(
-  actualOvers: number,
-  wickets: number,
-  maxOvers = T20_MAX_OVERS,
-  allOutWickets = T20_ALL_OUT_WICKETS,
-): number {
-  if (wickets >= allOutWickets) return maxOvers;
+/** NRR always uses overs actually played (from the scorecard). */
+export function effectiveOversForNrr(actualOvers: number): number {
   return actualOvers;
+}
+
+/** Display decimal overs as cricket notation: 19.666… → "19.4" */
+export function formatOversCricket(decimalOvers: number): string {
+  const whole = Math.floor(decimalOvers + 1e-9);
+  const balls = Math.round((decimalOvers - whole) * 6);
+  if (balls <= 0) return String(whole);
+  if (balls >= 6) return String(whole + 1);
+  return `${whole}.${balls}`;
 }
 
 export function computeNrr(
@@ -162,10 +163,9 @@ function parseInningsLine(line: string, lineNo: number): { inn: InningsLine | nu
   }
 
   const overs = oversParsed.overs;
-  const oversForNrr = effectiveOversForNrr(overs, wickets);
 
   return {
-    inn: { teamId, runs, wickets, overs, oversForNrr },
+    inn: { teamId, runs, wickets, overs },
   };
 }
 
@@ -191,11 +191,6 @@ export function parseScorecardText(text: string): {
       continue;
     }
     if (parsed.inn) {
-      if (parsed.inn.wickets >= T20_ALL_OUT_WICKETS && parsed.inn.overs < T20_MAX_OVERS) {
-        warnings.push(
-          `Match ${Math.ceil(inningsLines.length / 2) + 1}: ${parsed.inn.teamId} all out in ${line.match(/\([\d.]+/)?.[0] ?? "?"}) — NRR uses full ${T20_MAX_OVERS} overs`,
-        );
-      }
       inningsLines.push(parsed.inn);
       continue;
     }
@@ -270,8 +265,8 @@ export function buildStandingsFromInnings(inningsLines: InningsLine[]): Standing
         acc[side.teamId].points += 1;
         acc[side.teamId].runsFor += side.runs;
         acc[side.teamId].runsAgainst += opp.runs;
-        acc[side.teamId].oversFaced += side.oversForNrr;
-        acc[side.teamId].oversBowled += opp.oversForNrr;
+        acc[side.teamId].oversFaced += side.overs;
+        acc[side.teamId].oversBowled += opp.overs;
       }
       continue;
     }
@@ -292,8 +287,8 @@ export function buildStandingsFromInnings(inningsLines: InningsLine[]): Standing
       acc[side.teamId].played += 1;
       acc[side.teamId].runsFor += side.runs;
       acc[side.teamId].runsAgainst += opp.runs;
-      acc[side.teamId].oversFaced += side.oversForNrr;
-      acc[side.teamId].oversBowled += opp.oversForNrr;
+      acc[side.teamId].oversFaced += side.overs;
+      acc[side.teamId].oversBowled += opp.overs;
     }
     acc[winner.teamId].won += 1;
     acc[winner.teamId].points += 2;
@@ -399,35 +394,12 @@ export function formatNrr(nrr: number): string {
   return `${sign}${nrr.toFixed(3)}`;
 }
 
-/** Reference: KKR 200/6 (20) vs SRH 120/10 (16.4) — SRH all-out → 20 overs for NRR */
+/** Reference: KKR 200/6 (20) vs SRH 120/10 (16.4) — NRR uses actual overs only */
 export function referenceMatchNrr(): { kkr: number; srh: number } {
-  const kkrInn: InningsLine = {
-    teamId: "KKR",
-    runs: 200,
-    wickets: 6,
-    overs: 20,
-    oversForNrr: 20,
-  };
-  const srhInn: InningsLine = {
-    teamId: "SRH",
-    runs: 120,
-    wickets: 10,
-    overs: 16 + 4 / 6,
-    oversForNrr: 20,
-  };
-  const acc: Record<string, { rf: number; of: number; ra: number; ob: number }> = {
-    KKR: { rf: 0, of: 0, ra: 0, ob: 0 },
-    SRH: { rf: 0, of: 0, ra: 0, ob: 0 },
-  };
-  for (const side of [kkrInn, srhInn]) {
-    const opp = side === kkrInn ? srhInn : kkrInn;
-    acc[side.teamId].rf += side.runs;
-    acc[side.teamId].of += side.oversForNrr;
-    acc[side.teamId].ra += opp.runs;
-    acc[side.teamId].ob += opp.oversForNrr;
-  }
+  const kkrOvers = 20;
+  const srhOvers = 16 + 4 / 6;
   return {
-    kkr: computeNrr(acc.KKR.rf, acc.KKR.of, acc.KKR.ra, acc.KKR.ob),
-    srh: computeNrr(acc.SRH.rf, acc.SRH.of, acc.SRH.ra, acc.SRH.ob),
+    kkr: computeNrr(200, kkrOvers, 120, srhOvers),
+    srh: computeNrr(120, srhOvers, 200, kkrOvers),
   };
 }

@@ -36,13 +36,15 @@ assert(!oBad.ok, "19.6 rejected (invalid ball digit)");
 const oBad2 = parseOversDecimal("21");
 assert(!oBad2.ok, "21 overs rejected");
 
-// --- All-out NRR (IPL reference match) ---
+// --- NRR uses actual overs (reference match) ---
 const ref = referenceMatchNrr();
-assert(Math.abs(ref.kkr - 4) < 0.001, `KKR single-match NRR = +4.000 (got ${ref.kkr.toFixed(3)})`);
-assert(Math.abs(ref.srh + 4) < 0.001, `SRH single-match NRR = -4.000 (got ${ref.srh.toFixed(3)})`);
+const srhOvers = 16 + 4 / 6;
+const expectedKkr = 200 / 20 - 120 / srhOvers;
+assert(Math.abs(ref.kkr - expectedKkr) < 0.001, `KKR NRR uses played overs (got ${ref.kkr.toFixed(3)})`);
+assert(Math.abs(ref.srh + expectedKkr) < 0.001, `SRH NRR opposite sign (got ${ref.srh.toFixed(3)})`);
 
-assert(effectiveOversForNrr(16.666, 10) === 20, "All-out → 20 overs for NRR");
-assert(effectiveOversForNrr(19.666, 5) === 19.666, "Not all-out → actual overs");
+assert(effectiveOversForNrr(19.2) === 19.2, "All-out still uses actual overs played");
+assert(effectiveOversForNrr(19.666) === 19.666, "Chase overs unchanged");
 
 // --- Full sample league ---
 const sample = computeStandingsFromScorecardText(SAMPLE_LEAGUE_SCORECARDS);
