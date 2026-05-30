@@ -1,5 +1,6 @@
 import type { IplVenue } from "@/data/iplVenues";
 import type { ParsedTeam } from "./matchSchema";
+import type { SimModeConfig } from "./simModes";
 
 export interface NormalizeContext {
   teamA: ParsedTeam;
@@ -7,6 +8,10 @@ export interface NormalizeContext {
   venue: IplVenue;
   matchOvers: number;
   stage?: string;
+  /** Unique per simulate click — drives RNG variety */
+  variationSeed?: string;
+  avoidMargins?: string[];
+  simMode?: SimModeConfig;
 }
 
 function isRecord(v: unknown): v is Record<string, unknown> {

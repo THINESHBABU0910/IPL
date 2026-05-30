@@ -17,6 +17,8 @@
     "download-logos": "node scripts/download-logos.mjs",
     "generate-league-players": "node scripts/generate-league-players.mjs",
     "rebuild-all-pools": "node scripts/rebuild-all-player-pools.mjs",
+    "fix-overseas": "node scripts/fix-overseas-flags.mjs",
+    "verify-sim-variety": "npx tsx scripts/verify-simulation-variety.mjs",
     "download-league-logos": "node scripts/download-league-logos.mjs",
     "download-all-logos": "node scripts/download-all-logos.mjs",
     "validate-standings": "npx tsx scripts/validate-scorecard-standings.mjs"

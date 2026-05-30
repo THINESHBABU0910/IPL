@@ -6,6 +6,7 @@
 import { writeFileSync, mkdirSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
+import { isPlayerOverseasForPool } from "./league-overseas.mjs";
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 const DATA = join(__dir, "..", "src", "data");
@@ -21,7 +22,8 @@ const CATEGORIES = [
 ];
 
 function mk(id, name, country, role, set, previousTeam, opts = {}) {
-  const isOverseas = country !== "India" && country !== "England";
+  const league = opts.league || "ipl";
+  const isOverseas = opts.isOverseas ?? isPlayerOverseasForPool(country, league);
   const isCapped = opts.isCapped !== false;
   const baseMap = {
     M1: 200, M2: 200, M3: 200, BA1: 150, BA2: 75, BA3: 50, BA4: 50,

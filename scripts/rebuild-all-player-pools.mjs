@@ -9,6 +9,7 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { execSync } from "child_process";
+import { isPlayerOverseasForPool } from "./league-overseas.mjs";
 
 const __dir = path.dirname(fileURLToPath(import.meta.url));
 const DATA = path.join(__dir, "..", "src", "data");
@@ -38,7 +39,7 @@ const IPL_TEAM_IDS = ["CSK", "MI", "RCB", "DC", "KKR", "SRH", "PBKS", "RR", "GT"
 
 function mk(id, name, country, role, set, previousTeam, opts = {}) {
   const league = opts.league || "ipl";
-  const isOverseas = opts.isOverseas ?? (country !== "India");
+  const isOverseas = opts.isOverseas ?? isPlayerOverseasForPool(country, league);
   const isCapped = opts.isCapped !== false;
   const baseMap = {
     M1: 200, M2: 200, M3: 200, IL1: 200, IL2: 180, IL3: 160, IL4: 140,
@@ -434,7 +435,7 @@ for (const rel of ["leagues/wpl/players.json", "leagues/hundred/players.json", "
 // 3) Historical IPL-only greats
 for (const [name, country, role] of IPL_HISTORICAL_ONLY) {
   const isIntl = INTL_HALL_OF_FAME.has(normName(name));
-  addLegendSource({ name, country, role, isOverseas: country !== "India", battingStyle: "RHB" }, isIntl ? "intl" : "ipl");
+  addLegendSource({ name, country, role, isOverseas: isPlayerOverseasForPool(country, "legend"), battingStyle: "RHB" }, isIntl ? "intl" : "ipl");
 }
 
 // 4) Extra international legends not yet included
@@ -456,7 +457,7 @@ const EXTRA_INTL = [
   ["Martin Crowe", "New Zealand", "BATTER"], ["Inzamam-ul-Haq", "Pakistan", "BATTER"],
 ];
 for (const [name, country, role] of EXTRA_INTL) {
-  addLegendSource({ name, country, role, isOverseas: country !== "India", battingStyle: "RHB" }, "intl");
+  addLegendSource({ name, country, role, isOverseas: isPlayerOverseasForPool(country, "legend"), battingStyle: "RHB" }, "intl");
 }
 
 // Assign sets by tier then role
@@ -497,7 +498,7 @@ function pushLegend(e, set, baseLakhs) {
   legendOut.push(mk(
     `LG${String(lid++).padStart(3, "0")}`,
     e.name, e.country, e.role, set, "",
-    { league: "ipl", category: cat, isOverseas: e.isOverseas ?? e.country !== "India", battingStyle: e.battingStyle, bowlingStyle: e.bowlingStyle, age: 40 + (lid % 12), isCapped: true },
+    { league: "ipl", category: cat, isOverseas: e.isOverseas ?? isPlayerOverseasForPool(e.country, "legend"), battingStyle: e.battingStyle, bowlingStyle: e.bowlingStyle, age: 40 + (lid % 12), isCapped: true },
   ));
   legendOut[legendOut.length - 1].basePrice = baseLakhs * 100000;
 }

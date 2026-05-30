@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { IPL_VENUES, getVenueLabel, VENUE_COUNTRIES } from "@/data/iplVenues";
-import { parseBothTeams } from "@/lib/ai/teamInputParser";
+import { parseBothTeams, validateTeamNameInputs } from "@/lib/ai/teamInputParser";
 import type { MatchResult } from "@/lib/ai/matchSchema";
 import {
   loadMatchHistory,
@@ -11,59 +11,24 @@ import {
   downloadPdfFromBase64,
   type MatchHistoryEntry,
 } from "@/lib/ai/matchHistory";
+import {
+  buildSimModeConfig,
+  FRANCHISE_COMPETITIONS,
+  FRANCHISE_EXAMPLE_TEAM_A,
+  FRANCHISE_EXAMPLE_TEAM_B,
+  getFranchiseMeta,
+  LEGENDS_EXAMPLE_TEAM_A,
+  LEGENDS_EXAMPLE_TEAM_B,
+  type FranchiseCompetition,
+  type SimTab,
+} from "@/lib/ai/simModes";
 import { ParsedPreview } from "@/components/ai/ParsedPreview";
 import { MatchHistoryList, MatchPdfPreview } from "@/components/ai/MatchHistoryList";
 
-const STAGES = ["League", "Qualifier 1", "Qualifier 2", "Eliminator", "Final"];
-
-const EXAMPLE_TEAM_A = `CSK XI
-1. Jonny Bairstow ✈️
-2. Devdutt Padikkal (Comes only for batting)
-3. MS Dhoni (C) (WK)
-4. Ravindra Jadeja
-5. Shivam Dube
-6. Deepak Chahar
-7. Mahesh Theekshana ✈️
-8. Mukesh Kumar
-9. Matheesha Pathirana ✈️
-10. Rachin Ravindra ✈️
-11. Shaik Rasheed
-
-Impact: Mitchell Starc ✈️ (Bowling only)
-
-Bowling Quota:
-Deepak Chahar - 1, 3, 5
-Mitchell Starc - 2, 16, 18, 20
-Mahesh Theekshana - 4, 8, 12
-Matheesha Pathirana - 6, 10, 14, 17
-Mukesh Kumar - 7, 11, 15, 19
-Ravindra Jadeja - 9, 13`;
-
-const EXAMPLE_TEAM_B = `DELHI CAPITALS
-1. Jake Fraser-McGurk ✈️
-2. Abishek Porel (WK)
-3. KL Rahul (C)
-4. Tristan Stubbs ✈️
-5. Axar Patel
-6. Mitchell Starc ✈️
-7. T Natarajan
-8. Mukesh Kumar
-9. Kuldeep Yadav
-10. Ashutosh Sharma
-11. Vipraj Nigam
-
-Impact: Sameer Rizvi (Batting only)
-
-Bowling Quota:
-Mitchell Starc - 1, 3, 18, 20
-Axar Patel - 2, 6, 10, 14
-T Natarajan - 4, 8, 12, 16
-Kuldeep Yadav - 5, 9, 13, 17
-Mukesh Kumar - 7, 11, 15, 19`;
-
-type Step = "idle" | "parsing" | "ai" | "pdf" | "done";
-
 export default function AiMatchPage() {
+  const [simTab, setSimTab] = useState<SimTab>("franchise");
+  const [competition, setCompetition] = useState<FranchiseCompetition>("ipl");
+
   const [teamAText, setTeamAText] = useState("");
   const [teamBText, setTeamBText] = useState("");
   const [teamAName, setTeamAName] = useState("");
@@ -73,29 +38,71 @@ export default function AiMatchPage() {
   const [stage, setStage] = useState("League");
   const [venueSearch, setVenueSearch] = useState("");
 
-  const [step, setStep] = useState<Step>("idle");
+  const [step, setStep] = useState<"idle" | "parsing" | "ai" | "pdf" | "done">("idle");
   const [error, setError] = useState("");
   const [match, setMatch] = useState<MatchResult | null>(null);
   const [pdfBase64, setPdfBase64] = useState("");
   const [pdfFileName, setPdfFileName] = useState("");
   const [history, setHistory] = useState<MatchHistoryEntry[]>([]);
   const [showHistory, setShowHistory] = useState(false);
+  const [lastSimulationMode, setLastSimulationMode] = useState<string>("");
+
+  const simMode = useMemo(
+    () => buildSimModeConfig(simTab, competition, stage),
+    [simTab, competition, stage],
+  );
+
+  const franchiseStages = useMemo(
+    () => getFranchiseMeta(competition).stageOptions,
+    [competition],
+  );
 
   useEffect(() => {
     setHistory(loadMatchHistory());
   }, []);
 
+  const applyTabDefaults = useCallback((tab: SimTab, comp: FranchiseCompetition = competition) => {
+    const mode = buildSimModeConfig(tab, comp);
+    setVenueId(mode.defaultVenueId);
+    if (tab === "legends") {
+      setStage("Legends League");
+      setTeamAName("Sunrisers Hyderabad");
+      setTeamBName("Royal Challengers Bangalore");
+    } else {
+      const meta = getFranchiseMeta(comp);
+      setStage(meta.stageOptions[0]);
+      if (!teamAText.trim() && !teamBText.trim()) {
+        setTeamAName("");
+        setTeamBName("");
+      }
+    }
+  }, [competition, teamAText, teamBText]);
+
+  const switchTab = (tab: SimTab) => {
+    setSimTab(tab);
+    setMatch(null);
+    setPdfBase64("");
+    setError("");
+    setStep("idle");
+    if (tab === "legends") {
+      applyTabDefaults("legends");
+    } else {
+      applyTabDefaults("franchise", competition);
+    }
+  };
+
+  const onCompetitionChange = (comp: FranchiseCompetition) => {
+    setCompetition(comp);
+    const meta = getFranchiseMeta(comp);
+    setStage(meta.stageOptions[0]);
+    setVenueId(meta.defaultVenue);
+  };
+
   const parsed = useMemo(() => {
     if (!teamAText.trim() && !teamBText.trim()) {
       return { teamA: null, teamB: null, errors: [] as string[], warnings: [] as string[] };
     }
-    const result = parseBothTeams(teamAText, teamBText, teamAName, teamBName, overs);
-    return {
-      teamA: result.teamA,
-      teamB: result.teamB,
-      errors: result.errors,
-      warnings: result.warnings,
-    };
+    return parseBothTeams(teamAText, teamBText, teamAName, teamBName, overs);
   }, [teamAText, teamBText, teamAName, teamBName, overs]);
 
   const filteredVenues = useMemo(() => {
@@ -120,13 +127,23 @@ export default function AiMatchPage() {
     setPdfBase64("");
     setStep("parsing");
 
-    if (parsed.errors.length) {
-      setError(parsed.errors.join("; "));
+    const nameErrors = validateTeamNameInputs(teamAText, teamBText, teamAName, teamBName);
+    if (parsed.errors.length || nameErrors.length || !parsed.teamA || !parsed.teamB) {
+      setError([...nameErrors, ...parsed.errors].join("; ") || "Could not parse team sheets");
       setStep("idle");
       return;
     }
 
     setStep("ai");
+
+    const pairKey = `sim-margins:${simTab}:${teamAName || parsed.teamA?.name}:${teamBName || parsed.teamB?.name}`;
+    let avoidMargins: string[] = [];
+    try {
+      const raw = sessionStorage.getItem(pairKey);
+      if (raw) avoidMargins = JSON.parse(raw) as string[];
+    } catch {
+      avoidMargins = [];
+    }
 
     try {
       const res = await fetch("/api/ai/simulate", {
@@ -135,11 +152,14 @@ export default function AiMatchPage() {
         body: JSON.stringify({
           teamAText,
           teamBText,
-          teamAName: teamAName || parsed.teamA?.name,
-          teamBName: teamBName || parsed.teamB?.name,
+          teamAName: parsed.teamA.name,
+          teamBName: parsed.teamB.name,
           overs,
           venueId,
-          stage,
+          stage: simMode.stage,
+          simTab,
+          competition: simTab === "franchise" ? competition : undefined,
+          avoidMargins,
         }),
       });
 
@@ -152,6 +172,8 @@ export default function AiMatchPage() {
         pdfBase64?: string;
         pdfFileName?: string;
         simulationId?: string;
+        simulationMode?: string;
+        llmFallbackReason?: string;
       };
 
       if (!res.ok || !data.success || !data.match || !data.pdfBase64) {
@@ -163,8 +185,18 @@ export default function AiMatchPage() {
 
       setMatch(data.match);
       setPdfBase64(data.pdfBase64);
-      setPdfFileName(data.pdfFileName || "IPL_Match.pdf");
+      setPdfFileName(data.pdfFileName || "Match_Scorecard.pdf");
+      setLastSimulationMode(data.simulationMode ?? "local");
       setStep("done");
+
+      if (data.match?.result?.margin) {
+        const next = [data.match.result.margin, ...avoidMargins].slice(0, 5);
+        try {
+          sessionStorage.setItem(pairKey, JSON.stringify(next));
+        } catch {
+          /* ignore */
+        }
+      }
 
       const venue = IPL_VENUES.find((v) => v.id === venueId);
       const entry: MatchHistoryEntry = {
@@ -189,27 +221,53 @@ export default function AiMatchPage() {
     if (entry.match) setMatch(entry.match);
     if (entry.pdfBase64) {
       setPdfBase64(entry.pdfBase64);
-      setPdfFileName(`IPL_${entry.id}.pdf`);
+      setPdfFileName(`Match_${entry.id}.pdf`);
     }
     setShowHistory(false);
     setStep("done");
   };
 
   const loadExample = () => {
-    setTeamAText(EXAMPLE_TEAM_A);
-    setTeamBText(EXAMPLE_TEAM_B);
-    setTeamAName("Chennai Super Kings");
-    setTeamBName("Delhi Capitals");
+    if (simTab === "legends") {
+      setTeamAText(LEGENDS_EXAMPLE_TEAM_A);
+      setTeamBText(LEGENDS_EXAMPLE_TEAM_B);
+      setTeamAName("Sunrisers Hyderabad");
+      setTeamBName("Royal Challengers Bangalore");
+      setVenueId("chinnaswamy");
+      setStage("Legends League");
+    } else {
+      setTeamAText(FRANCHISE_EXAMPLE_TEAM_A);
+      setTeamBText(FRANCHISE_EXAMPLE_TEAM_B);
+      setTeamAName("Chennai Super Kings");
+      setTeamBName("Delhi Capitals");
+      setVenueId(getFranchiseMeta(competition).defaultVenue);
+      setStage(getFranchiseMeta(competition).stageOptions[0]);
+    }
   };
 
   const stepLabel =
     step === "parsing"
       ? "Validating squads…"
       : step === "ai"
-        ? "AI simulating match…"
+        ? "Simulating match…"
         : step === "pdf"
           ? "Generating scorecard PDF…"
           : "";
+
+  const tabBtn = (tab: SimTab, label: string, sub: string) => (
+    <button
+      type="button"
+      onClick={() => switchTab(tab)}
+      className={`flex-1 py-2.5 px-3 rounded-xl border text-left transition-colors ${
+        simTab === tab
+          ? "border-ipl-gold/60 bg-ipl-gold/15 text-ipl-gold"
+          : "border-ipl-border/50 bg-ipl-purple/10 text-gray-400 hover:border-ipl-border"
+      }`}
+    >
+      <span className="block text-xs font-bold tracking-wide">{label}</span>
+      <span className="block text-[9px] opacity-80 mt-0.5">{sub}</span>
+    </button>
+  );
 
   return (
     <div className="app-shell">
@@ -223,7 +281,9 @@ export default function AiMatchPage() {
               AI Match Simulator
             </span>
           </h1>
-          <p className="text-[9px] text-gray-500 tracking-wider uppercase">IPL · Realistic T20</p>
+          <p className="text-[9px] text-gray-500 tracking-wider uppercase">
+            {simTab === "legends" ? "Legends League" : `${simMode.competitionLabel} · T20`}
+          </p>
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <Link href="/ai/points" className="text-[10px] text-green-400 border border-green-500/30 rounded-lg px-2 py-0.5">
@@ -248,9 +308,23 @@ export default function AiMatchPage() {
         ) : (
           <>
             <div className="flex gap-2">
-              <button type="button" onClick={loadExample} className="text-[10px] px-3 py-1.5 rounded-lg border border-ipl-border/60 text-gray-400">
-                Load example
+              {tabBtn("franchise", "Franchise Leagues", "IPL · BBL · Hundred · SA20")}
+              {tabBtn("legends", "Legends League", "All-time fantasy XI")}
+            </div>
+
+            <div className="flex gap-2 flex-wrap">
+              <button
+                type="button"
+                onClick={loadExample}
+                className="text-[10px] px-3 py-1.5 rounded-lg border border-ipl-border/60 text-gray-400"
+              >
+                Load {simTab === "legends" ? "Legends" : competition.toUpperCase()} example
               </button>
+              {lastSimulationMode && step === "done" && (
+                <span className="text-[9px] text-gray-500 self-center">
+                  Engine: {lastSimulationMode === "llm" ? "AI + stats" : "Local stats"}
+                </span>
+              )}
             </div>
 
             <div className="grid gap-3 lg:grid-cols-2">
@@ -262,13 +336,14 @@ export default function AiMatchPage() {
                   type="text"
                   value={teamAName}
                   onChange={(e) => setTeamAName(e.target.value)}
-                  placeholder="Team name (optional)"
+                  placeholder="Team name (required, e.g. SRH)"
                   className="pro-input text-xs py-2"
+                  required
                 />
                 <textarea
                   value={teamAText}
                   onChange={(e) => setTeamAText(e.target.value)}
-                  placeholder="Paste playing XI, impact player, bowling quota…"
+                  placeholder="Playing XI, impact player, bowling quota…"
                   rows={12}
                   className="pro-input text-xs font-mono leading-relaxed resize-y min-h-[180px]"
                 />
@@ -281,20 +356,37 @@ export default function AiMatchPage() {
                   type="text"
                   value={teamBName}
                   onChange={(e) => setTeamBName(e.target.value)}
-                  placeholder="Team name (optional)"
+                  placeholder="Team name (required, e.g. KKR)"
                   className="pro-input text-xs py-2"
+                  required
                 />
                 <textarea
                   value={teamBText}
                   onChange={(e) => setTeamBText(e.target.value)}
-                  placeholder="Paste playing XI, impact player, bowling quota…"
+                  placeholder="Playing XI, impact player, bowling quota…"
                   rows={12}
                   className="pro-input text-xs font-mono leading-relaxed resize-y min-h-[180px]"
                 />
               </div>
             </div>
 
-            <div className="grid gap-3 sm:grid-cols-3">
+            <div className={`grid gap-3 ${simTab === "franchise" ? "sm:grid-cols-4" : "sm:grid-cols-3"}`}>
+              {simTab === "franchise" && (
+                <div>
+                  <label className="text-[10px] uppercase tracking-wider text-gray-500 font-semibold block mb-1">
+                    Competition
+                  </label>
+                  <select
+                    value={competition}
+                    onChange={(e) => onCompetitionChange(e.target.value as FranchiseCompetition)}
+                    className="pro-input text-sm py-2"
+                  >
+                    {FRANCHISE_COMPETITIONS.map((c) => (
+                      <option key={c.id} value={c.id}>{c.label}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
               <div>
                 <label className="text-[10px] uppercase tracking-wider text-gray-500 font-semibold block mb-1">
                   Overs (1–20)
@@ -316,21 +408,22 @@ export default function AiMatchPage() {
                   value={stage}
                   onChange={(e) => setStage(e.target.value)}
                   className="pro-input text-sm py-2"
+                  disabled={simTab === "legends"}
                 >
-                  {STAGES.map((s) => (
+                  {(simTab === "legends" ? ["Legends League", "Legends Final"] : franchiseStages).map((s) => (
                     <option key={s} value={s}>{s}</option>
                   ))}
                 </select>
               </div>
               <div>
                 <label className="text-[10px] uppercase tracking-wider text-gray-500 font-semibold block mb-1">
-                  Stadium (worldwide)
+                  Stadium
                 </label>
                 <input
                   type="text"
                   value={venueSearch}
                   onChange={(e) => setVenueSearch(e.target.value)}
-                  placeholder="Search by name, city, or country…"
+                  placeholder="Search venue…"
                   className="pro-input text-xs py-2 mb-1"
                 />
                 <select
@@ -353,6 +446,13 @@ export default function AiMatchPage() {
               </div>
             </div>
 
+            {simTab === "legends" && (
+              <p className="text-[10px] text-gray-500 border border-ipl-border/30 rounded-lg px-3 py-2">
+                Legends mode uses a dedicated AI prompt and IPL Legends Fantasy PDF layout — higher scores,
+                cinematic match summary, and all-time star narratives.
+              </p>
+            )}
+
             <ParsedPreview
               teamA={parsed.teamA}
               teamB={parsed.teamB}
@@ -366,7 +466,7 @@ export default function AiMatchPage() {
               disabled={step !== "idle" && step !== "done"}
               className="w-full py-3.5 bid-btn rounded-2xl text-black font-black text-sm disabled:opacity-50"
             >
-              {step !== "idle" && step !== "done" ? stepLabel : "Analyze → Simulate Match"}
+              {step !== "idle" && step !== "done" ? stepLabel : `Simulate ${simMode.competitionLabel} Match`}
             </button>
 
             {error && (
@@ -378,13 +478,15 @@ export default function AiMatchPage() {
             {match && step === "done" && (
               <div className="rounded-2xl border border-ipl-gold/30 bg-ipl-purple/20 p-4 space-y-3">
                 <div>
-                  <p className="text-lg font-bold text-ipl-gold">{match.result.summary || `${match.result.winner} won ${match.result.margin}`}</p>
+                  <p className="text-lg font-bold text-ipl-gold">
+                    {match.result.summary || `${match.result.winner} won ${match.result.margin}`}
+                  </p>
                   <p className="text-xs text-gray-400 mt-1">
                     {match.innings[0].teamName} {match.innings[0].totalRuns}/{match.innings[0].totalWickets} vs{" "}
                     {match.innings[1].teamName} {match.innings[1].totalRuns}/{match.innings[1].totalWickets}
                   </p>
                   <p className="text-xs text-gray-500">
-                    Toss: {match.toss.winner} ({match.toss.decisionText}) · {match.pitchType}
+                    {match.leagueBanner ?? match.stage} · Toss: {match.toss.winner} ({match.toss.decisionText})
                   </p>
                   <p className="text-xs text-ipl-gold mt-1">
                     Player of the Match:{" "}

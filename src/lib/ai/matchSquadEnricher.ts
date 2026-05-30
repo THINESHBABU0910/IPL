@@ -1,4 +1,10 @@
-import type { MatchResult, ParsedTeam } from "./matchSchema";
+import type { MatchBlueprint, MatchResult, ParsedTeam } from "./matchSchema";
+import {
+  attachFowPartnerships,
+  buildSquadSnapshots,
+  resolveScorecardTheme,
+} from "./scorecardMeta";
+import type { SimModeConfig } from "./simModes";
 import type { IplVenue } from "@/data/iplVenues";
 import { sanitizePlayerName, namesMatch } from "./playerNames";
 import {
@@ -450,12 +456,14 @@ function buildInnings(
   forcedWickets?: number,
   homeBoost = 0,
   isChase = false,
+  scoringBoost = 0,
 ): MatchResult["innings"][0] {
   const squadOrder = getBattingSquad(squad, true);
   const depth = analyzeBattingDepth(squad);
+  const boost = homeBoost + scoringBoost;
   const weighted =
     forcedTotal === undefined
-      ? weightedInningsTotal(pitchType, matchOvers, homeBoost, rng)
+      ? weightedInningsTotal(pitchType, matchOvers, boost, rng)
       : { total: forcedTotal, firestorm: forcedTotal >= 200 && pitchType === "Flat" };
   const wickets =
     forcedWickets ??
@@ -531,7 +539,7 @@ function buildInnings(
   }
 
   let totalRuns = sum + totalExtras;
-  const maxTotal = pitchMaxTotal(pitchType) + (homeBoost > 0 ? homeBoost : 0);
+  const maxTotal = pitchMaxTotal(pitchType) + (boost > 0 ? boost : 0);
   if (totalRuns > maxTotal && sum > 0) {
     const scale = (maxTotal - totalExtras) / sum;
     for (const b of batting) {
@@ -599,6 +607,7 @@ export function rebuildPartnershipsAndFow(match: MatchResult, matchOvers: number
         score: `${cumRuns}-${wkt}`,
         over: `${Math.floor(ballPos / 6)}.${ballPos % 6}`,
         batter: b.name,
+        partnership: `${cumRuns} (${ballPos})`,
       });
 
       const incoming = batting[i + 1]?.name ?? "";
@@ -635,17 +644,68 @@ export interface SquadEnrichContext {
   teamB: ParsedTeam;
   venue: IplVenue;
   matchOvers: number;
+  stage?: string;
+  variationSeed?: string;
+  blueprint?: MatchBlueprint;
+  simMode?: SimModeConfig;
 }
 
-/** Deterministic realistic scorecard from squads, pitch, home advantage */
+type MarginPlan =
+  | { kind: "wickets"; wicketsLeft: number; ballsRemaining: number }
+  | { kind: "runs"; runsMargin: number }
+  | { kind: "super_over" };
+
+function pickMarginPlan(rng: () => number, blueprint?: MatchBlueprint): MarginPlan {
+  if (blueprint?.marginType === "wickets") {
+    const w = 1 + Math.floor(rng() * 6);
+    return { kind: "wickets", wicketsLeft: w, ballsRemaining: Math.floor(rng() * 13) };
+  }
+  if (blueprint?.marginType === "runs") {
+    const r = blueprint.marginDetail
+      ? Math.max(2, parseInt(blueprint.marginDetail, 10) || 8)
+      : 2 + Math.floor(rng() * 24);
+    return { kind: "runs", runsMargin: r };
+  }
+  if (blueprint?.marginType === "super_over") return { kind: "super_over" };
+
+  const roll = rng();
+  if (roll < 0.38) {
+    const wicketsLeft = 1 + Math.floor(rng() * 6);
+    const ballsRemaining = Math.floor(rng() * 13);
+    return { kind: "wickets", wicketsLeft, ballsRemaining };
+  }
+  if (roll < 0.92) {
+    const runsMargin = 2 + Math.floor(rng() * 24);
+    return { kind: "runs", runsMargin };
+  }
+  return { kind: "super_over" };
+}
+
+function inn1TargetFromBlueprint(
+  rng: () => number,
+  pitchType: string,
+  blueprint?: MatchBlueprint,
+): number | undefined {
+  if (blueprint?.inn1RunsMin != null && blueprint?.inn1RunsMax != null) {
+    const lo = blueprint.inn1RunsMin;
+    const hi = blueprint.inn1RunsMax;
+    return lo + Math.floor(rng() * (hi - lo + 1));
+  }
+  return undefined;
+}
+
+/** Realistic scorecard from squads, pitch, home advantage — varied per variationSeed */
 export function enrichMatchFromSquads(match: MatchResult, ctx: SquadEnrichContext): MatchResult {
+  const variation = ctx.variationSeed ?? `${Date.now()}-${Math.random()}`;
   const tossSalt = match.toss?.winner
     ? `${match.toss.winner}-${match.toss.decision}`
-    : `${Date.now()}`;
-  const seed = `${ctx.teamA.name}-${ctx.teamB.name}-${ctx.venue.id}-${ctx.matchOvers}-${tossSalt}`;
+    : "toss";
+  const seed = `${ctx.teamA.name}-${ctx.teamB.name}-${ctx.venue.id}-${ctx.matchOvers}-${tossSalt}-${variation}`;
   const rng = seededRandom(seed);
+  const bowlSeed = `${seed}-bowl`;
 
-  const toss: MatchResult["toss"] =
+  const bp = ctx.blueprint;
+  let toss: MatchResult["toss"] =
     match.toss?.winner && match.toss?.decision
       ? match.toss
       : {
@@ -654,10 +714,38 @@ export function enrichMatchFromSquads(match: MatchResult, ctx: SquadEnrichContex
           decisionText: `${ctx.teamA.name} won the toss and elected to bat first`,
         };
 
+  if (bp?.tossWinner) {
+    const winner = [ctx.teamA.name, ctx.teamB.name].find((n) => nameMatch(n, bp.tossWinner!)) ?? bp.tossWinner;
+    const decision = bp.tossDecision ?? (rng() > 0.48 ? "bat" : "bowl");
+    toss = {
+      winner,
+      decision,
+      decisionText:
+        bp.tossReasoning?.slice(0, 200) ||
+        (decision === "bat"
+          ? `${winner} won the toss and elected to bat first`
+          : `${winner} won the toss and elected to bowl first`),
+    };
+  }
+
   const order = resolveInningsOrder(ctx, { ...match, toss });
+
+  const blueprintWinner = bp?.winner
+    ? [order.firstBat.name, order.secondBat.name].find((n) => nameMatch(n, bp.winner!))
+    : undefined;
+  const chaseWinsPreferred =
+    blueprintWinner != null
+      ? nameMatch(blueprintWinner, order.secondBat.name)
+      : rng() > (ctx.venue.typicalDew === "Heavy" ? 0.42 : 0.5);
+
+  const marginPlan = pickMarginPlan(rng, bp);
+  const chaseWins = marginPlan.kind === "super_over" ? false : chaseWinsPreferred;
 
   const homeFirst = isHomeSide(order.firstBat, ctx.venue) ? 6 : 0;
   const homeSecond = isHomeSide(order.secondBat, ctx.venue) ? 4 : 0;
+
+  const forcedInn1 = inn1TargetFromBlueprint(rng, ctx.venue.pitchType, bp);
+  const scoringBoost = ctx.simMode?.scoringBoost ?? 0;
 
   const inn1 = buildInnings(
     order.firstBat,
@@ -665,14 +753,15 @@ export function enrichMatchFromSquads(match: MatchResult, ctx: SquadEnrichContex
     ctx.matchOvers,
     ctx.venue.pitchType,
     rng,
-    undefined,
+    forcedInn1,
     undefined,
     homeFirst,
+    false,
+    scoringBoost,
   );
 
   inn1.target = undefined;
   const target = inn1.totalRuns + 1;
-  const chaseWins = rng() > (ctx.venue.typicalDew === "Heavy" ? 0.42 : 0.5);
   const chaseDepth = analyzeBattingDepth(order.secondBat);
   let chaseWickets = pickWickets(
     rng,
@@ -683,28 +772,30 @@ export function enrichMatchFromSquads(match: MatchResult, ctx: SquadEnrichContex
     chaseDepth,
   );
 
-  const nailBiter = rng() < (ctx.venue.typicalDew === "Heavy" ? 0.58 : 0.48);
-  let chaseMargin: number;
-  if (chaseWins) {
-    if (nailBiter) {
-      const tight = rng() > 0.45;
-      if (tight) {
-        chaseMargin = 1 + Math.floor(rng() * 4);
-        chaseWickets = Math.max(3, Math.min(7, chaseWickets));
-      } else {
-        chaseMargin = 1 + Math.floor(rng() * 7);
-        chaseWickets = Math.max(4, Math.min(9, chaseWickets + Math.floor(rng() * 2)));
-      }
-    } else {
-      chaseMargin = 1 + Math.floor(rng() * 10);
-    }
-  } else if (nailBiter) {
-    chaseMargin = 1 + Math.floor(rng() * 5);
+  if (bp?.chaseProfile === "collapse") chaseWickets = Math.min(10, chaseWickets + 2);
+  if (bp?.chaseProfile === "comfortable" && chaseWins) chaseWickets = Math.max(2, chaseWickets - 2);
+
+  let chaseTotal: number;
+  let ballsRemaining: string | undefined;
+  let chaseFinishNote: string | undefined;
+
+  if (chaseWins && marginPlan.kind === "wickets") {
+    chaseWickets = Math.min(9, Math.max(1, 10 - marginPlan.wicketsLeft));
+    chaseTotal = target + Math.floor(rng() * 8);
+    const rem = marginPlan.ballsRemaining;
+    if (rem > 0) ballsRemaining = `With ${rem} ball${rem === 1 ? "" : "s"} remaining`;
+  } else if (chaseWins) {
+    const cushion = 1 + Math.floor(rng() * 12);
+    chaseTotal = target + cushion - 1;
+    chaseWickets = Math.max(3, Math.min(8, chaseWickets));
+  } else if (marginPlan.kind === "runs") {
+    const m = marginPlan.runsMargin;
+    chaseTotal = Math.max(1, target - m - 1);
     chaseWickets = Math.max(6, Math.min(10, chaseWickets + 1));
   } else {
-    chaseMargin = 1 + Math.floor(rng() * 14);
+    chaseTotal = Math.max(1, target - (3 + Math.floor(rng() * 18)));
+    chaseWickets = Math.max(7, chaseWickets);
   }
-  const chaseTotal = chaseWins ? target + chaseMargin - 1 : target - chaseMargin;
 
   const inn2 = buildInnings(
     order.secondBat,
@@ -716,8 +807,25 @@ export function enrichMatchFromSquads(match: MatchResult, ctx: SquadEnrichContex
     chaseWickets,
     homeSecond,
     true,
+    scoringBoost,
   );
   inn2.target = target;
+
+  if (chaseWins && inn2.totalRuns >= target && ballsRemaining == null) {
+    const maxBalls = ctx.matchOvers * 6;
+    const usedBalls = inn2.batting.reduce((s, b) => s + b.balls, 0);
+    const remBalls = Math.max(0, maxBalls - usedBalls);
+    if (remBalls > 0 && remBalls <= 12) {
+      ballsRemaining = `With ${remBalls} ball${remBalls === 1 ? "" : "s"} remaining`;
+    }
+    if (inn2.overs < ctx.matchOvers - 0.01) {
+      const lastBowler = inn2.bowling?.find((b) => b.oversAssigned?.includes(String(ctx.matchOvers)));
+      if (lastBowler) {
+        chaseFinishNote = `${lastBowler.name}'s final scheduled over (${ctx.matchOvers}th) concluded early at ${inn2.overs} overs when the winning boundary was struck.`;
+        lastBowler.endedEarly = true;
+      }
+    }
+  }
 
   inn1.bowling = buildBowlingFromQuota(
     order.firstBowl,
@@ -731,7 +839,7 @@ export function enrichMatchFromSquads(match: MatchResult, ctx: SquadEnrichContex
       inningsIndex: 0,
       matchOvers: ctx.matchOvers,
       boundarySize: ctx.venue.boundarySize,
-      seedKey: `${ctx.teamA.name}-${ctx.teamB.name}-${ctx.venue.id}`,
+      seedKey: `${bowlSeed}-0`,
     },
     inn1.batting,
   );
@@ -747,7 +855,7 @@ export function enrichMatchFromSquads(match: MatchResult, ctx: SquadEnrichContex
       inningsIndex: 1,
       matchOvers: ctx.matchOvers,
       boundarySize: ctx.venue.boundarySize,
-      seedKey: `${ctx.teamA.name}-${ctx.teamB.name}-${ctx.venue.id}`,
+      seedKey: `${bowlSeed}-1`,
     },
     inn2.batting,
   );
@@ -775,24 +883,48 @@ export function enrichMatchFromSquads(match: MatchResult, ctx: SquadEnrichContex
             activatedAt: impactActivatedAt(t, toss, ctx),
           }));
 
+  const simMode = ctx.simMode;
+  const theme = simMode
+    ? resolveScorecardTheme(simMode)
+    : resolveScorecardTheme({
+        tab: "franchise",
+        stage: ctx.stage ?? "League",
+        scorecardTheme: "ipl",
+        pdfBanner: "INDIAN PREMIER LEAGUE",
+        competitionLabel: "IPL",
+        defaultVenueId: "chepauk",
+        scoringBoost: 0,
+      });
+
   const enriched: MatchResult = {
     ...match,
     matchTitle: `${ctx.teamA.name} vs ${ctx.teamB.name}`,
+    stage: ctx.stage ?? match.stage,
+    scorecardTheme: theme,
+    leagueBanner: simMode?.pdfBanner,
     venue: ctx.venue.name,
     venueCity: ctx.venue.city,
     pitchType: ctx.venue.pitchType,
     pitchDescription: ctx.venue.pitchDescription,
     dewCondition: ctx.venue.typicalDew,
+    matchInfo: {
+      attendance: bp?.attendance ?? match.matchInfo?.attendance,
+      weather: bp?.weather ?? match.matchInfo?.weather,
+      tossReasoning: bp?.tossReasoning ?? match.matchInfo?.tossReasoning,
+    },
+    squads: buildSquadSnapshots(ctx.teamA, ctx.teamB),
     toss,
     impactPlayers,
     innings: [inn1, inn2],
     partnerships: { firstInnings: [], secondInnings: [] },
     fallOfWickets: { firstInnings: [], secondInnings: [] },
     result: { winner: "", margin: "", summary: "" },
-    playerOfTheMatch: "",
+    playerOfTheMatch: bp?.heroBatter ?? "",
+    chaseFinishNote,
   };
 
   rebuildPartnershipsAndFow(enriched, ctx.matchOvers);
+  attachFowPartnerships(enriched);
 
   if (inn2.totalRuns >= target) {
     const wktsLeft = 10 - inn2.totalWickets;
@@ -806,7 +938,8 @@ export function enrichMatchFromSquads(match: MatchResult, ctx: SquadEnrichContex
     enriched.result = {
       winner: order.secondBat.name,
       margin: `by ${wktsLeft} wicket${wktsLeft === 1 ? "" : "s"}`,
-      summary: `${order.secondBat.name} chased ${target} with ${wktsLeft} wicket${wktsLeft === 1 ? "" : "s"} to spare${thriller}`,
+      summary: `${order.secondBat.name.toUpperCase()} WON BY ${wktsLeft} WICKET${wktsLeft === 1 ? "" : "S"}${thriller}`,
+      ballsRemaining,
     };
   } else {
     const margin = target - inn2.totalRuns - 1;
@@ -814,10 +947,16 @@ export function enrichMatchFromSquads(match: MatchResult, ctx: SquadEnrichContex
     enriched.result = {
       winner: order.firstBat.name,
       margin: `by ${Math.max(1, margin)} run${margin === 1 ? "" : "s"}`,
-      summary: `${order.firstBat.name} defended ${inn1.totalRuns} by ${Math.max(1, margin)} run${margin === 1 ? "" : "s"}${thriller}`,
+      summary: `${order.firstBat.name.toUpperCase()} WON BY ${Math.max(1, margin)} RUN${margin === 1 ? "" : "S"}${thriller}`,
     };
   }
 
-  enriched.playerOfTheMatch = pickMom(enriched);
+  enriched.playerOfTheMatch = bp?.heroBatter
+    ? (() => {
+        const hero = [...inn1.batting, ...inn2.batting].find((b) => nameMatch(b.name, bp.heroBatter!));
+        return hero ? `${hero.name} (${hero.runs} off ${hero.balls})` : bp.heroBatter!;
+      })()
+    : pickMom(enriched);
+
   return enriched;
 }

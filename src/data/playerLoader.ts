@@ -12,6 +12,7 @@ import wbblPlayersRaw from "./leagues/wbbl/players.json";
 import legendPlayersRaw from "./leagues/legend/players.json";
 import { RETENTIONS_2026, PURSE_REMAINING_2026 } from "./retentions2026";
 import { filterExcludedCountries } from "@/lib/playerFilter";
+import { applyOverseasFlag } from "@/lib/leagueOverseas";
 
 const LEAGUE_DATA: Record<LeagueId, PlayersData> = {
   ipl: playersRaw as PlayersData,
@@ -43,12 +44,13 @@ function getSetCategoryMap(poolId: PlayerPoolId): Map<string, string> {
   return map;
 }
 
-function normalizePlayer(p: PlayerJSON, league: LeagueId = "ipl"): Player {
+function normalizePlayer(p: PlayerJSON, league: LeagueId = "ipl", poolId: PlayerPoolId = league): Player {
   const minBase = getLeagueConfig(league).rules.minBasePriceLakhs;
   const rawLakhs = p.basePrice / 100000;
   const basePriceLakhs = Number.isFinite(rawLakhs) && rawLakhs >= minBase ? rawLakhs : minBase;
+  const withOverseas = applyOverseasFlag(p, poolId);
   return {
-    ...p,
+    ...withOverseas,
     basePriceLakhs,
     displayPrice: formatLeaguePrice(basePriceLakhs, league),
   };
@@ -56,7 +58,9 @@ function normalizePlayer(p: PlayerJSON, league: LeagueId = "ipl"): Player {
 
 function loadPoolPlayers(poolId: PlayerPoolId): Player[] {
   const priceLeague: LeagueId = poolId === "legend" ? "ipl" : poolId;
-  return filterExcludedCountries(POOL_DATA[poolId].players).map((p) => normalizePlayer(p, priceLeague));
+  return filterExcludedCountries(POOL_DATA[poolId].players).map((p) =>
+    normalizePlayer(p, priceLeague, poolId),
+  );
 }
 
 function loadLeaguePlayers(league: LeagueId): Player[] {

@@ -9,6 +9,7 @@ import {
 } from "./bowlingFigures";
 import { syncAllDismissals, validateFallOfWickets } from "./dismissalSync";
 import { polishMatchResult } from "./matchPolish";
+import { attachFowPartnerships } from "./scorecardMeta";
 
 function isNotOut(status: string): boolean {
   return /not out/i.test(status);
@@ -236,6 +237,7 @@ export function ensureMatchReadyForPdf(
   syncAllDismissals(current, teamA, teamB, pitchType);
   current = rebuildBowlingForMatch(current, teamA, teamB, pitchType, matchOvers, boundarySize, "final");
   rebuildPartnershipsAndFow(current, matchOvers);
+  attachFowPartnerships(current);
   return current;
 }
 

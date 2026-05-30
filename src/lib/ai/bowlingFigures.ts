@@ -1,4 +1,5 @@
 import type { MatchResult, ParsedTeam } from "./matchSchema";
+import { formatOversAssigned } from "./scorecardMeta";
 import { sanitizePlayerName, namesMatch } from "./playerNames";
 import { bowlerEconomyMultiplier, bowlerWicketWeightBoost } from "./playerPerformance";
 import { distributeWicketsByQuota, isSpinnerName } from "./realismEngine";
@@ -194,6 +195,7 @@ export function buildBowlingRowsFromQuota(
     return {
       name: sanitizePlayerName(q.name),
       overs: bowlerOvers,
+      oversAssigned: formatOversAssigned(q.overs),
       maidens: 0,
       runs: finalRuns,
       wickets: wktSplit[i] ?? 0,

@@ -18,6 +18,10 @@ export const BowlingRowSchema = z.object({
   wickets: z.number().int().min(0),
   economy: z.number().min(0),
   isImpact: z.boolean().optional(),
+  /** Comma-separated over numbers from bowling quota, e.g. "1, 3, 16, 19" */
+  oversAssigned: z.string().optional(),
+  /** Set when chase ends before scheduled final over */
+  endedEarly: z.boolean().optional(),
 });
 
 export const ExtrasSchema = z.object({
@@ -52,6 +56,8 @@ export const FallOfWicketSchema = z.object({
   score: z.string(),
   over: z.string(),
   batter: z.string(),
+  /** e.g. "106 (53)" — runs (balls) for that partnership */
+  partnership: z.string().optional(),
 });
 
 export const ImpactActivationSchema = z.object({
@@ -61,6 +67,57 @@ export const ImpactActivationSchema = z.object({
   reason: z.string(),
   activatedAt: z.string(),
 });
+
+export const SquadPlayerSnapshotSchema = z.object({
+  order: z.number().int().min(1),
+  name: z.string(),
+  overseas: z.boolean().optional(),
+  isCaptain: z.boolean().optional(),
+  isWicketkeeper: z.boolean().optional(),
+});
+
+export const SquadSnapshotSchema = z.object({
+  teamName: z.string(),
+  players: z.array(SquadPlayerSnapshotSchema),
+});
+
+export const MatchInfoSchema = z.object({
+  attendance: z.string().optional(),
+  weather: z.string().optional(),
+  tossReasoning: z.string().optional(),
+});
+
+export const MatchSummarySchema = z.object({
+  playerOfTheMatchBlurb: z.string().optional(),
+  turningPoint: z.string().optional(),
+  winningFactors: z.array(z.string()).optional(),
+  highestPartnership: z.string().optional(),
+  bestBowling: z.string().optional(),
+  bestBatting: z.string().optional(),
+  captaincyImpact: z.string().optional(),
+});
+
+/** LLM blueprint — small JSON to steer simulation variety */
+export const MatchBlueprintSchema = z.object({
+  tossWinner: z.string().optional(),
+  tossDecision: z.enum(["bat", "bowl"]).optional(),
+  tossReasoning: z.string().optional(),
+  attendance: z.string().optional(),
+  weather: z.string().optional(),
+  winner: z.string().optional(),
+  marginType: z.enum(["wickets", "runs", "super_over", "tie"]).optional(),
+  marginDetail: z.string().optional(),
+  inn1RunsMin: z.number().int().optional(),
+  inn1RunsMax: z.number().int().optional(),
+  chaseProfile: z.enum(["comfortable", "tight", "nail_biter", "collapse"]).optional(),
+  heroBatter: z.string().optional(),
+  heroBowler: z.string().optional(),
+  standoutPlayers: z.array(z.string()).optional(),
+});
+
+export type MatchBlueprint = z.infer<typeof MatchBlueprintSchema>;
+export type MatchSummary = z.infer<typeof MatchSummarySchema>;
+export type SquadSnapshot = z.infer<typeof SquadSnapshotSchema>;
 
 export const SuperOverSchema = z.object({
   battingTeam: z.string(),
@@ -75,11 +132,16 @@ export const SuperOverSchema = z.object({
 export const MatchResultSchema = z.object({
   matchTitle: z.string(),
   stage: z.string().optional(),
+  scorecardTheme: z.enum(["ipl", "legends"]).optional(),
+  /** PDF header banner override (IPL, BBL, Legends, etc.) */
+  leagueBanner: z.string().optional(),
   venue: z.string(),
   venueCity: z.string().optional(),
   pitchType: z.string(),
   pitchDescription: z.string(),
   dewCondition: z.string().optional(),
+  matchInfo: MatchInfoSchema.optional(),
+  squads: z.tuple([SquadSnapshotSchema, SquadSnapshotSchema]).optional(),
   toss: z.object({
     winner: z.string(),
     decision: z.enum(["bat", "bowl"]),
@@ -99,8 +161,11 @@ export const MatchResultSchema = z.object({
     winner: z.string(),
     margin: z.string(),
     summary: z.string(),
+    ballsRemaining: z.string().optional(),
   }),
   playerOfTheMatch: z.union([z.string(), z.array(z.string())]),
+  matchSummary: MatchSummarySchema.optional(),
+  chaseFinishNote: z.string().optional(),
   superOver: SuperOverSchema.optional(),
 });
 

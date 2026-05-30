@@ -25,7 +25,8 @@ function emptyInnings(teamName: string, matchOvers: number): MatchResult["inning
 
 /** Fast deterministic simulation — no external LLM (Render-safe, sub-second). */
 export function simulateMatchLocally(ctx: NormalizeContext): MatchResult {
-  const seed = `${ctx.teamA.name}-${ctx.teamB.name}-${ctx.venue.id}-${ctx.matchOvers}`;
+  const variation = ctx.variationSeed ?? `${Date.now()}`;
+  const seed = `${ctx.teamA.name}-${ctx.teamB.name}-${ctx.venue.id}-${ctx.matchOvers}-${variation}`;
   const rng = seededRandom(`${seed}-local`);
 
   const tossWinner = rng() > 0.5 ? ctx.teamA.name : ctx.teamB.name;

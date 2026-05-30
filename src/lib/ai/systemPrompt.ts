@@ -160,6 +160,54 @@ Dismissals: c X b Y | lbw b Y | b Y | run out | st X b Y | not out
 export const MATCH_SIMULATION_SYSTEM_PROMPT =
   REALISM_ENGINE + VALIDATION_RULES + JSON_SCHEMA;
 
+const BLUEPRINT_JSON_FIELDS = `Fields: tossWinner, tossDecision ("bat"|"bowl"), tossReasoning (2-3 sentences, venue-specific),
+attendance (e.g. "39,500 (Sold Out)"), weather (temp + conditions),
+winner (exact team name from input), marginType ("wickets"|"runs"|"super_over"),
+inn1RunsMin, inn1RunsMax (realistic for pitch), chaseProfile ("comfortable"|"tight"|"nail_biter"|"collapse"),
+heroBatter, heroBowler, standoutPlayers (string array of 2-4 names).
+Do NOT invent full scorecards — only blueprint metadata.`;
+
+export const MATCH_BLUEPRINT_FRANCHISE_PROMPT = `You are a professional T20 league match director (IPL, BBL, The Hundred, or SA20).
+Return ONE compact JSON object only. Respect the competition's typical conditions and tactics.
+Vary outcomes every run — never repeat the same margin type or hero story if avoidMargins is provided.
+${BLUEPRINT_JSON_FIELDS}
+Franchise leagues: realistic modern T20 — impact subs where applicable (IPL), role-based bowling quotas, home advantage at venue.`;
+
+export const MATCH_BLUEPRINT_LEGENDS_PROMPT = `You are director of the IPL LEGENDS FANTASY LEAGUE — all-time greats in a modern T20 clash.
+Return ONE compact JSON object only. Embrace high entertainment: big partnerships, iconic player duels, dew at Indian venues, crowd energy.
+Vary outcomes every run — never repeat the same margin type or hero story if avoidMargins is provided.
+${BLUEPRINT_JSON_FIELDS}
+Legends: scores often 180–230 on flat decks; name legendary heroes in standoutPlayers; toss reasoning should mention stars or conditions.`;
+
+export const MATCH_NARRATIVE_FRANCHISE_PROMPT = `You are a professional cricket broadcast analyst for a major T20 franchise league.
+Return ONE JSON object only with:
+playerOfTheMatchBlurb (3-4 sentences, specific stats),
+turningPoint (one over/moment, 2 sentences),
+winningFactors (array of 3-5 bullet strings),
+highestPartnership, bestBowling, bestBatting, captaincyImpact (1-2 sentences each).
+Use ONLY players and facts from the match data provided. Tone: broadcast-quality, modern T20.`;
+
+export const MATCH_NARRATIVE_LEGENDS_PROMPT = `You are a cricket storyteller for the IPL LEGENDS FANTASY LEAGUE — dramatic, fun, nostalgic.
+Return ONE JSON object only with:
+playerOfTheMatchBlurb (3-4 sentences, specific stats, mention why the legend stood out),
+turningPoint (one over/moment, 2 sentences — e.g. dew, a six, a key wicket),
+winningFactors (array of 3-5 bullet strings — conditions, star performances, tactics),
+highestPartnership, bestBowling, bestBatting, captaincyImpact (1-2 sentences each).
+Use ONLY players and facts from the match data provided. Be vivid, cinematic, and different each time.`;
+
+/** @deprecated use getBlueprintSystemPrompt */
+export const MATCH_BLUEPRINT_SYSTEM_PROMPT = MATCH_BLUEPRINT_FRANCHISE_PROMPT;
+/** @deprecated use getNarrativeSystemPrompt */
+export const MATCH_NARRATIVE_SYSTEM_PROMPT = MATCH_NARRATIVE_LEGENDS_PROMPT;
+
+export function getBlueprintSystemPrompt(simTab: "franchise" | "legends"): string {
+  return simTab === "legends" ? MATCH_BLUEPRINT_LEGENDS_PROMPT : MATCH_BLUEPRINT_FRANCHISE_PROMPT;
+}
+
+export function getNarrativeSystemPrompt(simTab: "franchise" | "legends"): string {
+  return simTab === "legends" ? MATCH_NARRATIVE_LEGENDS_PROMPT : MATCH_NARRATIVE_FRANCHISE_PROMPT;
+}
+
 function formatSquad(team: {
   name?: string;
   playingXI?: { name: string; role?: string; notes?: string }[];
@@ -194,7 +242,11 @@ function formatSquad(team: {
   return lines.join("\n");
 }
 
-export function buildUserPrompt(payload: unknown, validationErrors?: string[]): string {
+export function buildUserPrompt(
+  payload: unknown,
+  validationErrors?: string[],
+  simTab: "franchise" | "legends" = "franchise",
+): string {
   const p = payload as {
     teamA?: {
       name?: string;
@@ -208,7 +260,13 @@ export function buildUserPrompt(payload: unknown, validationErrors?: string[]): 
       impactPlayer?: { name: string; notes?: string };
       bowlingQuota?: { name: string; overs: number[] }[];
     };
-    matchConfig?: { overs?: number; stage?: string };
+    matchConfig?: {
+      overs?: number;
+      stage?: string;
+      simTab?: string;
+      competition?: string;
+      competitionLabel?: string;
+    };
     venue?: {
       name?: string;
       city?: string;
@@ -221,6 +279,11 @@ export function buildUserPrompt(payload: unknown, validationErrors?: string[]): 
   };
 
   const overs = p.matchConfig?.overs ?? 20;
+  const compLabel = p.matchConfig?.competitionLabel ?? "IPL";
+  const modeLine =
+    simTab === "legends"
+      ? "MODE: IPL Legends Fantasy League — all-time legends, high-scoring entertainment."
+      : `MODE: ${compLabel} franchise T20 — follow ${compLabel} tactics, impact player rules where noted, realistic league scoring.`;
   const venueBlock = [
     `Venue: ${p.venue?.name ?? "TBD"}, ${p.venue?.city ?? ""}`,
     `Pitch: ${p.venue?.pitchType ?? "Balanced"} — ${p.venue?.pitchDescription ?? ""}`,
@@ -230,7 +293,8 @@ export function buildUserPrompt(payload: unknown, validationErrors?: string[]): 
     .filter(Boolean)
     .join("\n");
 
-  let msg = `Simulate a ${overs}-over IPL ${p.matchConfig?.stage ?? "League"} match.
+  let msg = `Simulate a ${overs}-over ${compLabel} ${p.matchConfig?.stage ?? "League"} match.
+${modeLine}
 
 USER INPUT LAYER:
 ${formatSquad(p.teamA ?? {})}

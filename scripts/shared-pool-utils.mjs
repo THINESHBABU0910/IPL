@@ -1,6 +1,7 @@
 /**
  * Shared helpers for generating league player JSON pools.
  */
+import { isPlayerOverseasForPool } from "./league-overseas.mjs";
 export const CATEGORIES = [
   { id: "marquee", name: "Marquee Players", sets: ["M1", "M2"] },
   { id: "batters", name: "Batters", sets: ["BA1", "BA2", "BA3"] },
@@ -31,7 +32,7 @@ export function categoryForSet(set) {
 
 export function mk(id, name, country, role, set, previousTeam, opts = {}) {
   const league = opts.league || "ipl";
-  const isOverseas = opts.isOverseas ?? (country !== "India" && country !== "England");
+  const isOverseas = opts.isOverseas ?? isPlayerOverseasForPool(country, league);
   const isCapped = opts.isCapped !== false;
   const uncapBase = league === "hundred" ? 5 : league === "wpl" ? 10 : league === "wbbl" ? 10 : 20;
   const basePrice = isCapped ? (BASE_MAP[set] || 75) * 100000 : uncapBase * 100000;

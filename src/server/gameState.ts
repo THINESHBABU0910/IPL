@@ -8,6 +8,7 @@ import {
 
 } from "../lib/types";
 import { filterExcludedCountries } from "../lib/playerFilter";
+import { applyOverseasFlag } from "../lib/leagueOverseas";
 import { getDraftLeagueFromGender } from "../lib/draftRules";
 import { generateDraftTeamSlots, createDraftTeamSlot, draftSlotToTeamState } from "../lib/draftTeamNames";
 import { syncDraftTeamSlotsToTeams, updateSlotFromTeam } from "./draftEngine";
@@ -79,7 +80,12 @@ export function loadPlayersForPool(poolId: PlayerPoolId = "ipl"): Player[] {
     const basePriceLakhs = Number.isFinite(rawLakhs) && rawLakhs >= minBaseLakhs
       ? rawLakhs
       : minBaseLakhs;
-    return { ...pl, basePriceLakhs, displayPrice: formatLeaguePrice(basePriceLakhs, priceLeague) };
+    const withOverseas = applyOverseasFlag(pl, poolId);
+    return {
+      ...withOverseas,
+      basePriceLakhs,
+      displayPrice: formatLeaguePrice(basePriceLakhs, priceLeague),
+    };
   });
   playersCacheByPool.set(poolId, players);
   playerByIdCacheByPool.set(poolId, new Map(players.map((pl) => [pl.id, pl])));

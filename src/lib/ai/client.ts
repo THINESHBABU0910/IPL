@@ -35,10 +35,13 @@ export interface ChatCompletionOptions {
   messages: ChatMessage[];
   temperature?: number;
   maxTokens?: number;
+  /** Gateway conversation thread — continue same chat on next call when supported */
+  conversationId?: string;
 }
 
 export interface ChatCompletionResult {
   content: string;
+  conversationId?: string;
   usage?: {
     prompt_tokens: number;
     completion_tokens: number;
@@ -71,7 +74,7 @@ export async function callChatCompletion(options: ChatCompletionOptions): Promis
   const { baseUrl, apiKey, model } = getConfig();
   const maxTokens = options.maxTokens ?? computeMaxCompletionTokens(options.messages);
 
-  const body = {
+  const body: Record<string, unknown> = {
     model,
     messages: options.messages,
     temperature: options.temperature ?? 0.7,
@@ -79,6 +82,9 @@ export async function callChatCompletion(options: ChatCompletionOptions): Promis
     stream: false,
     response_format: { type: "json_object" as const },
   };
+  if (options.conversationId) {
+    body.conversation_id = options.conversationId;
+  }
 
   let res = await fetch(`${baseUrl}/chat/completions`, {
     method: "POST",
@@ -111,12 +117,17 @@ export async function callChatCompletion(options: ChatCompletionOptions): Promis
   const data = (await res.json()) as {
     choices?: { message?: { content?: string } }[];
     usage?: ChatCompletionResult["usage"];
+    conversation_id?: string;
+    id?: string;
   };
 
   const content = data.choices?.[0]?.message?.content?.trim();
   if (!content) throw new Error("Empty response from AI Gateway");
 
-  return { content, usage: data.usage };
+  const conversationId =
+    data.conversation_id ?? (typeof data.id === "string" ? data.id : undefined) ?? options.conversationId;
+
+  return { content, conversationId, usage: data.usage };
 }
 
 export async function simulateMatchJson(
